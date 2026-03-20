@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 280" font-family="system-ui,-apple-system,sans-serif" font-size="12">
+  <defs>
+    <marker id="a" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="#7c8aaa"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="880" height="280" rx="12" fill="#1a1b26"/>
+
+  <!-- Title -->
+  <text x="440" y="30" text-anchor="middle" fill="#c0caf5" font-size="14" font-weight="600">Request Lifecycle  —  What happens when an agent calls a tool</text>
+
+  <!-- Step 1: Tool Call -->
+  <rect x="20" y="56" width="110" height="68" rx="8" fill="#24283b" stroke="#7aa2f7" stroke-width="1.5"/>
+  <text x="75" y="78" text-anchor="middle" fill="#7aa2f7" font-size="11" font-weight="600">Tool Call</text>
+  <text x="75" y="95" text-anchor="middle" fill="#565f89" font-size="9">agent invokes</text>
+  <text x="75" y="108" text-anchor="middle" fill="#565f89" font-size="9">api_get_users_id</text>
+  <line x1="130" y1="90" x2="152" y2="90" stroke="#7c8aaa" stroke-width="1.2" marker-end="url(#a)"/>
+
+  <!-- Step 2: Parse Args -->
+  <rect x="154" y="56" width="110" height="68" rx="8" fill="#24283b" stroke="#414868" stroke-width="1"/>
+  <text x="209" y="78" text-anchor="middle" fill="#bb9af7" font-size="11" font-weight="600">Parse Args</text>
+  <text x="209" y="95" text-anchor="middle" fill="#565f89" font-size="9">unmarshal JSON</text>
+  <text x="209" y="108" text-anchor="middle" fill="#565f89" font-size="9">input arguments</text>
+  <line x1="264" y1="90" x2="286" y2="90" stroke="#7c8aaa" stroke-width="1.2" marker-end="url(#a)"/>
+
+  <!-- Step 3: Resolve Path -->
+  <rect x="288" y="56" width="110" height="68" rx="8" fill="#24283b" stroke="#414868" stroke-width="1"/>
+  <text x="343" y="78" text-anchor="middle" fill="#7dcfff" font-size="11" font-weight="600">Resolve Path</text>
+  <text x="343" y="95" text-anchor="middle" fill="#565f89" font-size="9">/users/{id}</text>
+  <text x="343" y="108" text-anchor="middle" fill="#565f89" font-size="9">  /users/abc123</text>
+  <line x1="398" y1="90" x2="420" y2="90" stroke="#7c8aaa" stroke-width="1.2" marker-end="url(#a)"/>
+
+  <!-- Step 4: Build Query -->
+  <rect x="422" y="56" width="110" height="68" rx="8" fill="#24283b" stroke="#414868" stroke-width="1"/>
+  <text x="477" y="78" text-anchor="middle" fill="#e0af68" font-size="11" font-weight="600">Build Query</text>
+  <text x="477" y="95" text-anchor="middle" fill="#565f89" font-size="9">?page=1&limit=20</text>
+  <text x="477" y="108" text-anchor="middle" fill="#565f89" font-size="9">from query params</text>
+  <line x1="532" y1="90" x2="554" y2="90" stroke="#7c8aaa" stroke-width="1.2" marker-end="url(#a)"/>
+
+  <!-- Step 5: HTTP Request -->
+  <rect x="556" y="56" width="130" height="68" rx="8" fill="#24283b" stroke="#9ece6a" stroke-width="1.5"/>
+  <text x="621" y="78" text-anchor="middle" fill="#9ece6a" font-size="11" font-weight="600">HTTP Request</text>
+  <text x="621" y="95" text-anchor="middle" fill="#565f89" font-size="9">Bearer token + headers</text>
+  <text x="621" y="108" text-anchor="middle" fill="#565f89" font-size="9">GET /users/abc123</text>
+  <line x1="686" y1="90" x2="718" y2="90" stroke="#7c8aaa" stroke-width="1.2" marker-end="url(#a)"/>
+
+  <!-- Step 6: Target API -->
+  <rect x="720" y="56" width="140" height="68" rx="8" fill="#1a1b26" stroke="#f7768e" stroke-width="1.5"/>
+  <text x="790" y="78" text-anchor="middle" fill="#f7768e" font-size="11" font-weight="600">Target API</text>
+  <text x="790" y="95" text-anchor="middle" fill="#565f89" font-size="9">processes request</text>
+  <text x="790" y="108" text-anchor="middle" fill="#565f89" font-size="9">returns JSON</text>
+
+  <!-- Return path -->
+  <path d="M790,124 L790,160 L75,160 L75,180" fill="none" stroke="#414868" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#a)"/>
+
+  <!-- Step 7: Response -->
+  <rect x="20" y="182" width="820" height="68" rx="8" fill="#24283b" stroke="#414868" stroke-width="1"/>
+  <text x="440" y="206" text-anchor="middle" fill="#c0caf5" font-size="12" font-weight="600">Response  →  Agent</text>
+  <text x="440" y="226" text-anchor="middle" fill="#565f89" font-size="10">API response is formatted as indented JSON and returned as MCP TextContent  |  204 No Content → {"status": "ok"}  |  4xx/5xx → APIError with status + body</text>
+
+  <!-- Labels -->
+  <text x="75" y="265" text-anchor="middle" fill="#7aa2f7" font-size="9" font-weight="600">1</text>
+  <text x="209" y="265" text-anchor="middle" fill="#bb9af7" font-size="9" font-weight="600">2</text>
+  <text x="343" y="265" text-anchor="middle" fill="#7dcfff" font-size="9" font-weight="600">3</text>
+  <text x="477" y="265" text-anchor="middle" fill="#e0af68" font-size="9" font-weight="600">4</text>
+  <text x="621" y="265" text-anchor="middle" fill="#9ece6a" font-size="9" font-weight="600">5</text>
+  <text x="790" y="265" text-anchor="middle" fill="#f7768e" font-size="9" font-weight="600">6</text>
+</svg>

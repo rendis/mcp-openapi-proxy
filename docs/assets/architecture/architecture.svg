@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 520" font-family="system-ui,-apple-system,sans-serif" font-size="13">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#7c8aaa"/>
+    </marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#6d9eeb"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="880" height="520" rx="12" fill="#1a1b26"/>
+
+  <!-- Title -->
+  <text x="440" y="36" text-anchor="middle" fill="#c0caf5" font-size="16" font-weight="600">mcp-openapi-proxy  Architecture</text>
+
+  <!-- === STARTUP PHASE === -->
+  <text x="40" y="72" fill="#7aa2f7" font-size="11" font-weight="600" letter-spacing="1.5">STARTUP</text>
+  <line x1="40" y1="80" x2="840" y2="80" stroke="#292e42" stroke-width="1"/>
+
+  <!-- OpenAPI Spec -->
+  <rect x="40" y="96" width="140" height="52" rx="8" fill="#24283b" stroke="#414868" stroke-width="1"/>
+  <text x="110" y="118" text-anchor="middle" fill="#bb9af7" font-size="12" font-weight="600">OpenAPI Spec</text>
+  <text x="110" y="136" text-anchor="middle" fill="#565f89" font-size="10">YAML / JSON / URL</text>
+
+  <!-- Arrow -->
+  <line x1="180" y1="122" x2="220" y2="122" stroke="#7c8aaa" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Spec Parser -->
+  <rect x="222" y="96" width="140" height="52" rx="8" fill="#24283b" stroke="#414868" stroke-width="1"/>
+  <text x="292" y="118" text-anchor="middle" fill="#7dcfff" font-size="12" font-weight="600">Spec Parser</text>
+  <text x="292" y="136" text-anchor="middle" fill="#565f89" font-size="10">kin-openapi</text>
+
+  <!-- Arrow -->
+  <line x1="362" y1="122" x2="402" y2="122" stroke="#7c8aaa" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Endpoints -->
+  <rect x="404" y="96" width="140" height="52" rx="8" fill="#24283b" stroke="#414868" stroke-width="1"/>
+  <text x="474" y="118" text-anchor="middle" fill="#e0af68" font-size="12" font-weight="600">Endpoints[]</text>
+  <text x="474" y="136" text-anchor="middle" fill="#565f89" font-size="10">method + path + params</text>
+
+  <!-- Arrow -->
+  <line x1="544" y1="122" x2="584" y2="122" stroke="#7c8aaa" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Tool Generator -->
+  <rect x="586" y="96" width="140" height="52" rx="8" fill="#24283b" stroke="#414868" stroke-width="1"/>
+  <text x="656" y="118" text-anchor="middle" fill="#9ece6a" font-size="12" font-weight="600">Tool Generator</text>
+  <text x="656" y="136" text-anchor="middle" fill="#565f89" font-size="10">name + schema + handler</text>
+
+  <!-- Arrow down -->
+  <line x1="656" y1="148" x2="656" y2="188" stroke="#7c8aaa" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- MCP Tools -->
+  <rect x="586" y="190" width="140" height="44" rx="8" fill="#1a1b26" stroke="#9ece6a" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="656" y="216" text-anchor="middle" fill="#9ece6a" font-size="12" font-weight="600">MCP Tools</text>
+
+  <!-- === RUNTIME PHASE === -->
+  <text x="40" y="276" fill="#7aa2f7" font-size="11" font-weight="600" letter-spacing="1.5">RUNTIME</text>
+  <line x1="40" y1="284" x2="840" y2="284" stroke="#292e42" stroke-width="1"/>
+
+  <!-- AI Agent -->
+  <rect x="40" y="304" width="150" height="64" rx="10" fill="#1a1b26" stroke="#7aa2f7" stroke-width="1.5"/>
+  <text x="115" y="330" text-anchor="middle" fill="#7aa2f7" font-size="13" font-weight="700">AI Agent</text>
+  <text x="115" y="350" text-anchor="middle" fill="#565f89" font-size="10">Claude / Codex / Gemini</text>
+
+  <!-- Arrow: Agent -> MCP Server -->
+  <line x1="190" y1="326" x2="260" y2="326" stroke="#6d9eeb" stroke-width="1.5" marker-end="url(#arrow-accent)"/>
+  <text x="225" y="318" text-anchor="middle" fill="#565f89" font-size="9">tool call</text>
+
+  <!-- MCP Server -->
+  <rect x="262" y="304" width="160" height="64" rx="10" fill="#24283b" stroke="#bb9af7" stroke-width="1.5"/>
+  <text x="342" y="328" text-anchor="middle" fill="#bb9af7" font-size="13" font-weight="700">MCP Server</text>
+  <text x="342" y="348" text-anchor="middle" fill="#565f89" font-size="10">stdio transport</text>
+
+  <!-- Arrow: MCP Server -> HTTP Client -->
+  <line x1="422" y1="336" x2="492" y2="336" stroke="#6d9eeb" stroke-width="1.5" marker-end="url(#arrow-accent)"/>
+
+  <!-- HTTP Client -->
+  <rect x="494" y="304" width="160" height="64" rx="10" fill="#24283b" stroke="#e0af68" stroke-width="1.5"/>
+  <text x="574" y="328" text-anchor="middle" fill="#e0af68" font-size="13" font-weight="700">HTTP Client</text>
+  <text x="574" y="348" text-anchor="middle" fill="#565f89" font-size="10">Bearer auth + headers</text>
+
+  <!-- Arrow: HTTP Client -> Target API -->
+  <line x1="654" y1="336" x2="694" y2="336" stroke="#6d9eeb" stroke-width="1.5" marker-end="url(#arrow-accent)"/>
+
+  <!-- Target API -->
+  <rect x="696" y="304" width="144" height="64" rx="10" fill="#1a1b26" stroke="#f7768e" stroke-width="1.5"/>
+  <text x="768" y="330" text-anchor="middle" fill="#f7768e" font-size="13" font-weight="700">Target API</text>
+  <text x="768" y="350" text-anchor="middle" fill="#565f89" font-size="10">your REST backend</text>
+
+  <!-- Return arrow -->
+  <line x1="696" y1="356" x2="192" y2="356" stroke="#414868" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <text x="440" y="375" text-anchor="middle" fill="#565f89" font-size="9">JSON response</text>
+
+  <!-- === AUTH LAYER === -->
+  <text x="40" y="420" fill="#7aa2f7" font-size="11" font-weight="600" letter-spacing="1.5">AUTHENTICATION</text>
+  <line x1="40" y1="428" x2="840" y2="428" stroke="#292e42" stroke-width="1"/>
+
+  <!-- Static Token -->
+  <rect x="40" y="444" width="170" height="44" rx="8" fill="#24283b" stroke="#414868" stroke-width="1"/>
+  <text x="125" y="464" text-anchor="middle" fill="#9ece6a" font-size="11" font-weight="600">1. Static Token</text>
+  <text x="125" y="479" text-anchor="middle" fill="#565f89" font-size="9">MCP_AUTH_TOKEN (dev)</text>
+
+  <!-- OIDC -->
+  <rect x="240" y="444" width="170" height="44" rx="8" fill="#24283b" stroke="#414868" stroke-width="1"/>
+  <text x="325" y="464" text-anchor="middle" fill="#e0af68" font-size="11" font-weight="600">2. OIDC PKCE</text>
+  <text x="325" y="479" text-anchor="middle" fill="#565f89" font-size="9">auto-refresh (prod)</text>
+
+  <!-- No Auth -->
+  <rect x="440" y="444" width="170" height="44" rx="8" fill="#24283b" stroke="#414868" stroke-width="1"/>
+  <text x="525" y="464" text-anchor="middle" fill="#f7768e" font-size="11" font-weight="600">3. No Auth</text>
+  <text x="525" y="479" text-anchor="middle" fill="#565f89" font-size="9">fallback (warning)</text>
+
+  <!-- Priority arrows -->
+  <text x="217" y="469" text-anchor="middle" fill="#414868" font-size="14">></text>
+  <text x="417" y="469" text-anchor="middle" fill="#414868" font-size="14">></text>
+
+  <!-- Token storage note -->
+  <rect x="640" y="444" width="200" height="44" rx="8" fill="none" stroke="#292e42" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="740" y="464" text-anchor="middle" fill="#565f89" font-size="10">~/.mcp-openapi-proxy/</text>
+  <text x="740" y="479" text-anchor="middle" fill="#565f89" font-size="10">{prefix}-tokens.json (0600)</text>
+
+  <!-- Connecting line from OIDC to storage -->
+  <line x1="410" y1="466" x2="638" y2="466" stroke="#292e42" stroke-width="1" stroke-dasharray="3,3"/>
+</svg>
