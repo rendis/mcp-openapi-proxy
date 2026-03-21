@@ -1,0 +1,129 @@
+openapi: "3.0.3"
+info:
+  title: Edge Cases API
+  version: "1.0.0"
+paths:
+  /v1/health.check:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+  /upload:
+    post:
+      summary: Upload a file
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Upload result
+  /submit:
+    post:
+      summary: Submit a form
+      operationId: submitForm
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+      responses:
+        "200":
+          description: Submission result
+  /items/{id}:
+    get:
+      summary: Get item
+      operationId: getItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: session
+          in: cookie
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: An item
+          content:
+            application/json:
+              schema:
+                type: object
+  /search:
+    get:
+      summary: Search with filters
+      operationId: search
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - active
+              - inactive
+              - archived
+        - name: email
+          in: query
+          required: false
+          schema:
+            type: string
+            format: email
+        - name: min_score
+          in: query
+          required: false
+          schema:
+            type: number
+            minimum: 0
+            maximum: 100
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+  /data/{key}:
+    get:
+      summary: Get data by key
+      operationId: getData
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Data value
+          content:
+            application/json:
+              schema:
+                type: object

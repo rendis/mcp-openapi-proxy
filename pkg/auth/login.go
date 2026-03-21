@@ -7,9 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -139,8 +141,8 @@ func RunLogin(cfg LoginConfig) error {
 	// Build authorization URL
 	authURL := buildAuthURL(authEndpoint, clientID, redirectURI, scopes, state, challenge)
 
-	fmt.Printf("\nOpening browser for login...\n")
-	fmt.Printf("If the browser doesn't open, visit this URL manually:\n\n  %s\n\n", authURL)
+	fmt.Fprintf(os.Stderr, "\nOpening browser for login...\n")
+	fmt.Fprintf(os.Stderr, "If the browser doesn't open, visit this URL manually:\n\n  %s\n\n", authURL)
 
 	_ = openBrowser(authURL)
 
@@ -162,7 +164,7 @@ func RunLogin(cfg LoginConfig) error {
 	_ = srv.Shutdown(ctx)
 
 	// Exchange code for tokens
-	fmt.Println("Exchanging authorization code for tokens...")
+	fmt.Fprintln(os.Stderr, "Exchanging authorization code for tokens...")
 
 	tokens, err := exchangeCode(tokenEndpoint, clientID, code, redirectURI, verifier)
 	if err != nil {
@@ -187,12 +189,12 @@ func RunLogin(cfg LoginConfig) error {
 		return fmt.Errorf("save tokens: %w", err)
 	}
 
-	fmt.Printf("\nLogin successful! Tokens saved to %s\n", filePath)
+	fmt.Fprintf(os.Stderr, "\nLogin successful! Tokens saved to %s\n", filePath)
 	if tokens.RefreshToken != "" {
-		fmt.Println("Refresh token obtained -- tokens will auto-refresh.")
+		fmt.Fprintln(os.Stderr, "Refresh token obtained -- tokens will auto-refresh.")
 	} else {
-		fmt.Println("Warning: no refresh token received. You may need to login again when the token expires.")
-		fmt.Println("Tip: ensure your OIDC provider returns refresh tokens (scope: offline_access).")
+		fmt.Fprintln(os.Stderr, "Warning: no refresh token received. You may need to login again when the token expires.")
+		fmt.Fprintln(os.Stderr, "Tip: ensure your OIDC provider returns refresh tokens (scope: offline_access).")
 	}
 
 	return nil
@@ -218,7 +220,7 @@ func resolveOIDCConfig(cfg LoginConfig) (authEndpoint, tokenEndpoint, clientID, 
 		return "", "", "", "", fmt.Errorf("either APIBaseURL or direct OIDC endpoints (AuthEndpoint, TokenEndpoint, ClientID) must be provided")
 	}
 
-	fmt.Println("Fetching OIDC configuration from API...")
+	fmt.Fprintln(os.Stderr, "Fetching OIDC configuration from API...")
 
 	apiCfg, err := fetchAuthConfig(cfg.APIBaseURL)
 	if err != nil {
@@ -260,7 +262,7 @@ func resolveOIDCConfig(cfg LoginConfig) (authEndpoint, tokenEndpoint, clientID, 
 
 func fetchAuthConfig(apiBaseURL string) (*authConfigResponse, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(apiBaseURL + "/api/v1/auth/config")
+	resp, err := client.Get(strings.TrimRight(apiBaseURL, "/") + "/api/v1/auth/config")
 	if err != nil {
 		return nil, err
 	}
@@ -303,16 +305,29 @@ func randomBytes(n int) ([]byte, error) {
 }
 
 func buildAuthURL(endpoint, clientID, redirectURI, scopes, state, challenge string) string {
-	params := url.Values{
-		"response_type":         {"code"},
-		"client_id":             {clientID},
-		"redirect_uri":          {redirectURI},
-		"scope":                 {scopes},
-		"state":                 {state},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		params := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {clientID},
+			"redirect_uri":          {redirectURI},
+			"scope":                 {scopes},
+			"state":                 {state},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+		}
+		return endpoint + "?" + params.Encode()
 	}
-	return endpoint + "?" + params.Encode()
+	q := u.Query()
+	q.Set("response_type", "code")
+	q.Set("client_id", clientID)
+	q.Set("redirect_uri", redirectURI)
+	q.Set("scope", scopes)
+	q.Set("state", state)
+	q.Set("code_challenge", challenge)
+	q.Set("code_challenge_method", "S256")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func exchangeCode(tokenEndpoint, clientID, code, redirectURI, verifier string) (*tokenResponse, error) {
@@ -332,7 +347,8 @@ func exchangeCode(tokenEndpoint, clientID, code, redirectURI, verifier string) (
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token endpoint returned %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var tok tokenResponse

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -76,6 +77,9 @@ func (p *OIDCTokenProvider) Token(ctx context.Context) (string, error) {
 	}
 
 	if err := p.refresh(ctx); err != nil {
+		if time.Now().Before(p.tokens.ExpiresAt) {
+			return p.tokens.AccessToken, nil
+		}
 		return "", fmt.Errorf("token refresh failed (run login again): %w", err)
 	}
 	return p.tokens.AccessToken, nil
@@ -88,7 +92,9 @@ func (p *OIDCTokenProvider) refresh(ctx context.Context) error {
 		"client_id":     {p.tokens.ClientID},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.tokens.TokenEndpoint, strings.NewReader(form.Encode()))
+	refreshCtx, cancel := context.WithTimeout(context.Background(), refreshTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(refreshCtx, "POST", p.tokens.TokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}
@@ -101,7 +107,8 @@ func (p *OIDCTokenProvider) refresh(ctx context.Context) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("token endpoint returned %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var tok tokenResponse
@@ -115,6 +122,8 @@ func (p *OIDCTokenProvider) refresh(ctx context.Context) error {
 	}
 	if tok.ExpiresIn > 0 {
 		p.tokens.ExpiresAt = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
+	} else {
+		p.tokens.ExpiresAt = time.Now().Add(1 * time.Hour)
 	}
 
 	return p.save()
@@ -133,7 +142,14 @@ func SaveTokens(filePath string, tokens *StoredTokens) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filePath, data, tokenFilePerm)
+	tmpPath := filePath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, tokenFilePerm); err != nil {
+		return fmt.Errorf("write token file: %w", err)
+	}
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		return fmt.Errorf("rename token file: %w", err)
+	}
+	return nil
 }
 
 func loadTokens(filePath string) (*StoredTokens, error) {

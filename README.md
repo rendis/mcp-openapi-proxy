@@ -67,7 +67,8 @@ flowchart LR
 - **No response validation** — forwards raw API responses to the agent
 - **No OpenAPI 2.0** — only 3.x specs (convert older specs with [swagger2openapi](https://github.com/Mermade/oas-kit))
 - **No SSE/WebSocket** — stdio transport only
-- **No file uploads** — multipart/form-data endpoints are skipped
+- **No file uploads** — `multipart/form-data` and `application/x-www-form-urlencoded` endpoints are skipped
+- **No cookie parameters** — cookie params in the spec are logged as a warning and ignored
 
 ## Quick Start
 
@@ -207,6 +208,7 @@ Each tool receives a flat JSON object as input:
 
 - **Path parameters** → top-level properties: `{"id": "abc123"}`
 - **Query parameters** → top-level properties: `{"page": 1, "limit": 20}`
+- **Header parameters** → top-level properties: `{"X-Request-Id": "req-001"}` (injected as HTTP headers)
 - **Request body** → nested under `body`: `{"body": {"name": "new user"}}`
 
 Required parameters from the OpenAPI spec are enforced in the tool's JSON Schema.
@@ -236,7 +238,7 @@ MCP_AUTH_TOKEN=dev-token mcp-openapi-proxy
 
 ### OIDC PKCE (Production)
 
-For production APIs protected by an OIDC provider (Keycloak, Auth0, etc.), use the built-in browser-based login flow.
+For production APIs protected by any OIDC provider (Keycloak, Auth0, Okta, Google, etc.), use the built-in browser-based login flow. Endpoints are discovered automatically via `.well-known/openid-configuration`.
 
 ```mermaid
 sequenceDiagram
@@ -301,6 +303,7 @@ pkg/
   auth/                      Authentication providers
     provider.go              TokenProvider interface + StaticTokenProvider
     oidc_provider.go         OIDC token storage, loading, and transparent refresh
+    discovery.go             OIDC .well-known/openid-configuration discovery
     login.go                 Browser-based OIDC Authorization Code + PKCE flow
     logout.go                Token file removal
     status.go                Print current auth state
@@ -412,13 +415,13 @@ Once installed, agents automatically know how to set up MCP servers from OpenAPI
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `MCP_SPEC is required` | Missing `MCP_SPEC` env var | Set `MCP_SPEC` to a path or URL pointing to your OpenAPI 3.x spec |
-| `MCP_BASE_URL is required` | Missing `MCP_BASE_URL` env var | Set `MCP_BASE_URL` to your API's base URL |
-| `failed to load spec` | Spec file not found or URL unreachable | Check the file path or URL; verify network/VPN if remote |
+| `MCP_SPEC environment variable is required` | Missing `MCP_SPEC` env var | Set `MCP_SPEC` to a path or URL pointing to your OpenAPI 3.x spec |
+| `MCP_BASE_URL environment variable is required` | Missing `MCP_BASE_URL` env var | Set `MCP_BASE_URL` to your API's base URL |
+| `load spec:` ... | Spec file not found or URL unreachable | Check the file path or URL; verify network/VPN if remote |
 | `401 Unauthorized` on tool calls | No auth configured or token expired | Set `MCP_AUTH_TOKEN` or run `mcp-openapi-proxy login` for OIDC |
-| Tool not found for an endpoint | Endpoint uses `multipart/form-data` | File upload endpoints are skipped; not supported |
+| Tool not found for an endpoint | Endpoint uses `multipart/form-data` or `x-www-form-urlencoded` | These endpoints are skipped; not supported |
 | Parse error on spec | Spec is Swagger 2.0, not OpenAPI 3.x | Convert with [swagger2openapi](https://github.com/Mermade/oas-kit) first |
-| `warning: no token provider configured` | No `MCP_AUTH_TOKEN` and no prior OIDC login | Expected if your API doesn't require auth; otherwise set a token |
+| `warning: no auth token configured` | No `MCP_AUTH_TOKEN` and no prior OIDC login | Expected if your API doesn't require auth; otherwise set a token |
 
 ## Tech Stack
 
@@ -439,7 +442,7 @@ Contributions are welcome.
 4. Push to the branch and open a Pull Request
 
 > [!NOTE]
-> There are no tests yet. If you're modifying existing logic, adding tests alongside your change is appreciated.
+> Please include tests for any changes. Run `go test ./...` to verify.
 
 ## License
 

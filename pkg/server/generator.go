@@ -58,6 +58,9 @@ func toolAnnotations(method string) *mcp.ToolAnnotations {
 // toolName builds a sanitized tool name: {prefix}_{method}_{sanitized_path}.
 func toolName(prefix, method, path string) string {
 	sanitized := sanitizePath(path)
+	if sanitized == "" {
+		return strings.ToLower(fmt.Sprintf("%s_%s", prefix, strings.ToLower(method)))
+	}
 	name := fmt.Sprintf("%s_%s_%s", prefix, strings.ToLower(method), sanitized)
 	return strings.ToLower(name)
 }
@@ -104,6 +107,15 @@ func buildInputSchema(ep spec.Endpoint) *jsonschema.Schema {
 
 	// Query parameters.
 	for _, p := range ep.QueryParams {
+		propSchema := paramToSchema(p)
+		schema.Properties[p.Name] = propSchema
+		if p.Required {
+			required = append(required, p.Name)
+		}
+	}
+
+	// Header parameters.
+	for _, p := range ep.HeaderParams {
 		propSchema := paramToSchema(p)
 		schema.Properties[p.Name] = propSchema
 		if p.Required {
@@ -196,7 +208,7 @@ func buildHandler(ep spec.Endpoint, c *client.Client) mcp.ToolHandler {
 		path := ep.Path
 		for _, p := range ep.PathParams {
 			if val, ok := args[p.Name]; ok {
-				path = strings.ReplaceAll(path, "{"+p.Name+"}", fmt.Sprintf("%v", val))
+				path = strings.ReplaceAll(path, "{"+p.Name+"}", url.PathEscape(fmt.Sprintf("%v", val)))
 			}
 		}
 
@@ -204,12 +216,30 @@ func buildHandler(ep spec.Endpoint, c *client.Client) mcp.ToolHandler {
 		query := url.Values{}
 		for _, p := range ep.QueryParams {
 			if val, ok := args[p.Name]; ok {
-				query.Set(p.Name, fmt.Sprintf("%v", val))
+				switch v := val.(type) {
+				case []interface{}:
+					for _, elem := range v {
+						query.Add(p.Name, fmt.Sprintf("%v", elem))
+					}
+				default:
+					query.Set(p.Name, fmt.Sprintf("%v", val))
+				}
 			}
 		}
 
 		if encoded := query.Encode(); encoded != "" {
 			path += "?" + encoded
+		}
+
+		// Collect header parameters.
+		var reqHeaders map[string]string
+		if len(ep.HeaderParams) > 0 {
+			reqHeaders = make(map[string]string, len(ep.HeaderParams))
+			for _, p := range ep.HeaderParams {
+				if val, ok := args[p.Name]; ok {
+					reqHeaders[p.Name] = fmt.Sprintf("%v", val)
+				}
+			}
 		}
 
 		// Extract body.
@@ -221,7 +251,7 @@ func buildHandler(ep spec.Endpoint, c *client.Client) mcp.ToolHandler {
 		}
 
 		// Call the API.
-		result, err := c.Do(ctx, ep.Method, path, body)
+		result, err := c.Do(ctx, ep.Method, path, body, reqHeaders)
 		if err != nil {
 			return &mcp.CallToolResult{
 				IsError: true,

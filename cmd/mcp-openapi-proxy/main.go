@@ -76,9 +76,13 @@ func runLogin() error {
 	clientID := os.Getenv("MCP_OIDC_CLIENT_ID")
 
 	if issuer != "" && clientID != "" {
-		// Direct OIDC endpoints — discover from well-known.
-		cfg.AuthEndpoint = issuer + "/protocol/openid-connect/auth"
-		cfg.TokenEndpoint = issuer + "/protocol/openid-connect/token"
+		// Discover endpoints via .well-known/openid-configuration (standard OIDC).
+		authEP, tokenEP, err := auth.DiscoverOIDCEndpoints(issuer)
+		if err != nil {
+			return fmt.Errorf("OIDC discovery from %s: %w", issuer, err)
+		}
+		cfg.AuthEndpoint = authEP
+		cfg.TokenEndpoint = tokenEP
 		cfg.ClientID = clientID
 	} else if baseURL := os.Getenv("MCP_BASE_URL"); baseURL != "" {
 		// Fetch auth config from API.

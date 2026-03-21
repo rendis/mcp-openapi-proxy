@@ -124,6 +124,7 @@ Pattern: `{prefix}_{method}_{sanitized_path}` — lowercase, special chars → `
 
 - **Path params** → top-level: `{"id": "abc123"}`
 - **Query params** → top-level: `{"page": 1, "limit": 20}`
+- **Header params** → top-level: `{"X-Request-Id": "req-001"}` (injected as HTTP headers)
 - **Request body** → nested under `body`: `{"body": {"name": "new user"}}`
 
 ## Multiple APIs
@@ -146,3 +147,5 @@ Use distinct prefixes to run side-by-side:
 - **No auth configured** → runs but prints warning; API calls may 401
 - **Spec URL unreachable** → fails at startup; check network/VPN
 - **multipart/form-data endpoints** → silently skipped, not generated as tools
+- **application/x-www-form-urlencoded endpoints** → also skipped
+- **Cookie parameters** → not supported, logged as warning and ignored

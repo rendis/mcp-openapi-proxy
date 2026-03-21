@@ -1,0 +1,80 @@
+openapi: "3.0.3"
+info:
+  title: Response Handling API
+  version: "1.0.0"
+paths:
+  /text:
+    get:
+      summary: Returns plain text
+      operationId: getText
+      responses:
+        "200":
+          description: Plain text response
+          content:
+            text/plain:
+              schema:
+                type: string
+  /html:
+    get:
+      summary: Returns HTML
+      operationId: getHtml
+      responses:
+        "200":
+          description: HTML response
+          content:
+            text/html:
+              schema:
+                type: string
+  /created:
+    post:
+      summary: Creates a resource with empty 201
+      operationId: createResource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Created (no body)
+  /accepted:
+    post:
+      summary: Async operation returns 202
+      operationId: asyncOp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                task:
+                  type: string
+      responses:
+        "202":
+          description: Accepted (no body)
+  /error:
+    get:
+      summary: Returns 400 error
+      operationId: getError
+      responses:
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+  /internal:
+    get:
+      summary: Returns 500 error
+      operationId: getInternal
+      responses:
+        "500":
+          description: Internal server error

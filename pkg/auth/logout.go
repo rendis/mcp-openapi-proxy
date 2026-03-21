@@ -15,11 +15,11 @@ func RunLogout(prefix string) error {
 	filePath := TokenFilePath(prefix)
 	if err := os.Remove(filePath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Println("No stored tokens found -- already logged out.")
+			fmt.Fprintln(os.Stderr, "No stored tokens found -- already logged out.")
 			return nil
 		}
 		return fmt.Errorf("remove token file: %w", err)
 	}
-	fmt.Printf("Tokens removed from %s\n", filePath)
+	fmt.Fprintf(os.Stderr, "Tokens removed from %s\n", filePath)
 	return nil
 }

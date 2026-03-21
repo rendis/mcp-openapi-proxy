@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -35,6 +36,12 @@ type Param struct {
 	Required    bool
 	Type        string // string, integer, number, boolean, array
 	Default     any
+	Enum        []any
+	Format      string
+	Minimum     *float64
+	Maximum     *float64
+	MinLength   *uint64
+	MaxLength   *uint64
 }
 
 // RequestBody describes the request body schema.
@@ -133,6 +140,18 @@ func extractEndpoints(doc *openapi3.T) []Endpoint {
 					Type:        schemaType(p.Schema),
 					Default:     schemaDefault(p.Schema),
 				}
+				if p.Schema != nil && p.Schema.Value != nil {
+					s := p.Schema.Value
+					param.Enum = s.Enum
+					param.Format = s.Format
+					param.Minimum = s.Min
+					param.Maximum = s.Max
+					if s.MinLength != 0 {
+						ml := s.MinLength
+						param.MinLength = &ml
+					}
+					param.MaxLength = s.MaxLength
+				}
 				switch p.In {
 				case openapi3.ParameterInPath:
 					ep.PathParams = append(ep.PathParams, param)
@@ -140,6 +159,8 @@ func extractEndpoints(doc *openapi3.T) []Endpoint {
 					ep.QueryParams = append(ep.QueryParams, param)
 				case openapi3.ParameterInHeader:
 					ep.HeaderParams = append(ep.HeaderParams, param)
+				case openapi3.ParameterInCookie:
+					log.Printf("warning: cookie parameter %q on %s %s is not supported and will be ignored", p.Name, method, path)
 				}
 			}
 
@@ -229,8 +250,14 @@ func extractBodySchema(rb *openapi3.RequestBody) (string, map[string]any) {
 		}
 	}
 
-	// Fallback: first available content type.
+	// Fallback: first available content type that is NOT multipart or form-urlencoded.
 	for ct, mt := range rb.Content {
+		if strings.HasPrefix(ct, "multipart/") {
+			continue
+		}
+		if strings.HasPrefix(ct, "application/x-www-form") {
+			continue
+		}
 		if mt != nil && mt.Schema != nil {
 			schema := schemaRefToMap(mt.Schema)
 			return ct, schema

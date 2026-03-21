@@ -1,0 +1,81 @@
+openapi: "3.0.3"
+info:
+  title: Headers and Auth API
+  version: "1.0.0"
+security:
+  - bearerAuth: []
+paths:
+  /resources:
+    get:
+      summary: List resources
+      operationId: listResources
+      parameters:
+        - name: X-Request-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Tenant
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Resource list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+  /resources/{id}:
+    patch:
+      summary: Partially update a resource
+      operationId: patchResource
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                status:
+                  type: string
+      responses:
+        "200":
+          description: Updated resource
+          content:
+            application/json:
+              schema:
+                type: object
+  /admin/config:
+    get:
+      summary: Get admin config
+      operationId: getAdminConfig
+      parameters:
+        - name: X-Admin-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Admin configuration
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer

@@ -12,6 +12,7 @@ Go CLI that converts OpenAPI 3.x specs into MCP stdio servers dynamically — on
 - `pkg/client/errors.go` — API error parsing
 - `pkg/auth/provider.go` — TokenProvider interface + StaticTokenProvider
 - `pkg/auth/oidc_provider.go` — OIDC token storage, auto-refresh (30s margin)
+- `pkg/auth/discovery.go` — OIDC .well-known/openid-configuration endpoint discovery
 - `pkg/auth/login.go` — Browser-based OIDC Authorization Code + PKCE flow
 - `pkg/auth/logout.go` — Token file removal
 - `pkg/auth/status.go` — Auth state display
@@ -26,10 +27,11 @@ Go CLI that converts OpenAPI 3.x specs into MCP stdio servers dynamically — on
 - Config is 100% env vars: `MCP_SPEC`, `MCP_BASE_URL`, `MCP_TOOL_PREFIX`, `MCP_AUTH_TOKEN`, `MCP_OIDC_ISSUER`, `MCP_OIDC_CLIENT_ID`, `MCP_EXTRA_HEADERS`
 
 ## Conventions
-- No tests yet — add tests when modifying existing logic
+- Tests: `go test ./...` — run before committing
 - Tool naming: `{prefix}_{method}_{sanitized_path}` (lowercase, special chars → `_`, collapsed)
 - Auth priority: static token > OIDC from disk > no auth (warning)
 - Tokens stored at `~/.mcp-openapi-proxy/{prefix}-tokens.json` with 0600 perms
+- Header params exposed as top-level properties in tool input schema, injected as HTTP headers
 - Request body nested under `"body"` key in tool input schema
 - GET tools → readOnly annotation, DELETE tools → destructive annotation
 - stdio transport only
@@ -39,4 +41,10 @@ Go CLI that converts OpenAPI 3.x specs into MCP stdio servers dynamically — on
 - `jsonschema-go` uses `json.RawMessage` for Default field
 - kin-openapi `SchemaRef.Value.Type` returns `*openapi3.Types` (slice), not a string — use `.Slice()`
 - Version hardcoded as `0.1.0` in `server.go`
-- No `.gitignore` — binary at `bin/` should be ignored
+- Cookie parameters are not supported — logged as warning, ignored
+- `multipart/form-data` and `application/x-www-form-urlencoded` bodies are skipped
+- Path param values are URL-encoded; array query params use repeated keys
+- Non-JSON API responses returned as raw text strings
+- Trailing slash on `MCP_BASE_URL` is stripped automatically
+- OIDC token refresh uses detached context (context.Background)
+- Token file writes are atomic (tmp + rename)
