@@ -1,4 +1,5 @@
 bin/
+mcp-openapi-proxy
 *.exe
 .env
 .env.*
