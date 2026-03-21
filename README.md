@@ -112,6 +112,8 @@ All configuration is done through environment variables.
 
 > [!IMPORTANT]
 > **Authentication priority:** Static token (`MCP_AUTH_TOKEN`) → OIDC tokens from disk → No auth (warning to stderr).
+>
+> Trailing slashes on `MCP_BASE_URL` are stripped automatically.
 
 ## Commands
 
@@ -206,8 +208,8 @@ Path segments are lowercased. Special characters (`/`, `-`, `{`, `}`, `.`) are r
 
 Each tool receives a flat JSON object as input:
 
-- **Path parameters** → top-level properties: `{"id": "abc123"}`
-- **Query parameters** → top-level properties: `{"page": 1, "limit": 20}`
+- **Path parameters** → top-level properties: `{"id": "abc123"}` (values are URL-encoded automatically)
+- **Query parameters** → top-level properties: `{"page": 1, "limit": 20}` (arrays use repeated keys: `tags=a&tags=b`)
 - **Header parameters** → top-level properties: `{"X-Request-Id": "req-001"}` (injected as HTTP headers)
 - **Request body** → nested under `body`: `{"body": {"name": "new user"}}`
 
@@ -263,12 +265,13 @@ sequenceDiagram
 **Login** — opens a browser window for Authorization Code + PKCE:
 
 ```bash
-# With direct OIDC endpoints
+# Standard OIDC discovery (recommended — works with any OIDC provider)
+# Discovers endpoints via {issuer}/.well-known/openid-configuration
 MCP_OIDC_ISSUER=https://auth.example.com/realms/myrealm \
 MCP_OIDC_CLIENT_ID=my-client \
 mcp-openapi-proxy login
 
-# Or auto-discover from API's /api/v1/auth/config
+# Application-specific discovery (requires the API to expose /api/v1/auth/config)
 MCP_BASE_URL=https://api.example.com mcp-openapi-proxy login
 ```
 
@@ -284,7 +287,10 @@ mcp-openapi-proxy status
 mcp-openapi-proxy logout
 ```
 
-Tokens are stored at `~/.mcp-openapi-proxy/{prefix}-tokens.json` with `0600` permissions.
+Tokens are stored at `~/.mcp-openapi-proxy/mcp-openapi-proxy-tokens.json` with `0600` permissions. The file is written atomically (temp file + rename).
+
+> [!TIP]
+> If token refresh fails but the current access token hasn't expired yet, the existing token is used as a fallback — no error is surfaced to the agent.
 
 ## Architecture
 
@@ -308,19 +314,21 @@ pkg/
     logout.go                Token file removal
     status.go                Print current auth state
   client/                    HTTP client for API calls
-    client.go                Bearer auth, extra headers, JSON request/response
+    client.go                Bearer auth, extra headers, response handling (JSON + raw text)
     errors.go                API error parsing
 ```
 
 ### Request Lifecycle
 
 1. Agent calls a tool (e.g. `api_get_users_id` with `{"id": "abc123", "include_roles": true}`)
-2. Handler substitutes path parameters: `/users/{id}` → `/users/abc123`
-3. Query parameters are URL-encoded: `?include_roles=true`
+2. Handler substitutes path parameters: `/users/{id}` → `/users/abc123` (values are URL-encoded)
+3. Query parameters are URL-encoded: `?include_roles=true` (arrays use repeated keys: `tags=a&tags=b`)
 4. Request body (if present) is extracted from the `body` property and marshaled to JSON
 5. HTTP client sends the request with `Authorization: Bearer <token>` and any extra headers
-6. Response is formatted as indented JSON and returned as MCP `TextContent`
-   - `204 No Content` → `{"status": "ok"}`
+6. Response handling:
+   - JSON responses → parsed and formatted as indented JSON
+   - Non-JSON responses (`text/plain`, `text/html`, etc.) → returned as raw text
+   - `204 No Content` or any `2xx` with empty body → `{"status": "ok"}`
    - `4xx/5xx` → `APIError` with status code and response body
 
 ## Examples

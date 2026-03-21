@@ -95,12 +95,12 @@ Set `MCP_AUTH_TOKEN`. Sent as `Authorization: Bearer <token>` on every request.
 **Login** — opens browser for Authorization Code + PKCE:
 
 ```bash
-# Direct OIDC endpoints
+# Standard OIDC discovery (recommended — any OIDC provider)
 MCP_OIDC_ISSUER=https://auth.example.com/realms/myrealm \
 MCP_OIDC_CLIENT_ID=my-client \
 mcp-openapi-proxy login
 
-# Or auto-discover from API's /api/v1/auth/config
+# Application-specific discovery (requires API to expose /api/v1/auth/config)
 MCP_BASE_URL=https://api.example.com mcp-openapi-proxy login
 ```
 
@@ -108,7 +108,7 @@ MCP_BASE_URL=https://api.example.com mcp-openapi-proxy login
 
 **Logout:** `mcp-openapi-proxy logout`
 
-Tokens stored at `~/.mcp-openapi-proxy/mcp-openapi-proxy-tokens.json` (0600). Auto-refreshes when within 30s of expiry.
+Tokens stored at `~/.mcp-openapi-proxy/mcp-openapi-proxy-tokens.json` (0600, atomic writes). Auto-refreshes when within 30s of expiry. If refresh fails but token hasn't expired, the existing token is used as fallback.
 
 ## Tool Naming
 
@@ -122,10 +122,12 @@ Pattern: `{prefix}_{method}_{sanitized_path}` — lowercase, special chars → `
 
 ## Input Schema
 
-- **Path params** → top-level: `{"id": "abc123"}`
-- **Query params** → top-level: `{"page": 1, "limit": 20}`
+- **Path params** → top-level: `{"id": "abc123"}` (URL-encoded automatically)
+- **Query params** → top-level: `{"page": 1, "limit": 20}` (arrays use repeated keys: `tags=a&tags=b`)
 - **Header params** → top-level: `{"X-Request-Id": "req-001"}` (injected as HTTP headers)
 - **Request body** → nested under `body`: `{"body": {"name": "new user"}}`
+- **Non-JSON responses** → returned as raw text string (not error)
+- **Empty 2xx responses** → `{"status": "ok"}`
 
 ## Multiple APIs
 
