@@ -21,6 +21,8 @@ You have a REST API with 50+ endpoints and an OpenAPI spec that documents every 
 
 **mcp-openapi-proxy** eliminates that. One binary. One environment variable pointing to your spec. Every endpoint becomes an MCP tool at startup. No codegen, no generated files, no maintenance.
 
+And authentication makes it worse. Production APIs use OIDC, OAuth2, or token-based auth — the agent needs valid credentials, tokens that expire need refreshing, and secrets need secure storage. mcp-openapi-proxy handles this end-to-end: static tokens for development, browser-based OIDC PKCE for production, with automatic token refresh and secure on-disk storage.
+
 ## How It Works
 
 <p align="center">
@@ -54,8 +56,9 @@ flowchart LR
 - **Local and remote specs** — load from a file path or any `http://` / `https://` URL
 - **One tool per endpoint** — auto-generated with full JSON Schema input validation
 - **Tool annotations** — `GET` → read-only, `DELETE` → destructive
-- **OIDC PKCE authentication** — browser-based login with automatic token refresh
-- **Static token authentication** — simple bearer token for development and CI
+- **Production-ready authentication** — built-in OIDC Authorization Code + PKCE flow with browser-based login, automatic token refresh, and secure on-disk storage (`0600`). Works with any OIDC provider: Keycloak, Auth0, Okta, Google, and more. No auth code to write.
+- **Development auth** — simple static bearer token via `MCP_AUTH_TOKEN` for local dev and CI
+- **Zero-config auth priority** — static token → OIDC from disk → no auth fallback. The proxy resolves credentials automatically at startup.
 - **Configurable tool prefix** — namespace tools to avoid collisions when running multiple proxies
 - **Extra headers** — inject custom headers (workspace IDs, API versions) into every request
 - **stdio transport** — compatible with Claude Code, OpenAI Codex, Gemini CLI, and any MCP client
@@ -229,6 +232,8 @@ Required parameters from the OpenAPI spec are enforced in the tool's JSON Schema
 ```
 
 ## Authentication
+
+Most MCP server implementations require you to handle authentication yourself — embedding tokens in environment variables, writing refresh logic, managing secrets. mcp-openapi-proxy handles the full authentication lifecycle so your AI agent can call protected APIs without any auth code in your project.
 
 ### Static Token (Development)
 

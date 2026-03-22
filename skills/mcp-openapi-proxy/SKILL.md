@@ -84,6 +84,8 @@ MCP_AUTH_TOKEN = "your-token"
 
 ## Authentication
 
+Built-in auth for production APIs — no auth code needed. OIDC PKCE with auto-refresh, or static tokens for dev.
+
 **Priority:** static token → OIDC from disk → no auth (warning).
 
 ### Static Token (dev/CI)
