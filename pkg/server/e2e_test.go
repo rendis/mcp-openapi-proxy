@@ -46,12 +46,31 @@ func resultText(t *testing.T, res *mcp.CallToolResult) string {
 	return tc.Text
 }
 
+// resultJSON parses the envelope from the handler result text.
 func resultJSON(t *testing.T, res *mcp.CallToolResult) map[string]any {
 	t.Helper()
 	text := resultText(t, res)
 	var m map[string]any
 	if err := json.Unmarshal([]byte(text), &m); err != nil {
 		t.Fatalf("unmarshal result: %v (text: %s)", err, text)
+	}
+	return m
+}
+
+// resultBody extracts the "body" field from the envelope.
+func resultBody(t *testing.T, res *mcp.CallToolResult) any {
+	t.Helper()
+	m := resultJSON(t, res)
+	return m["body"]
+}
+
+// resultBodyMap extracts the "body" field from the envelope as a map.
+func resultBodyMap(t *testing.T, res *mcp.CallToolResult) map[string]any {
+	t.Helper()
+	b := resultBody(t, res)
+	m, ok := b.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map body, got %T: %v", b, b)
 	}
 	return m
 }
@@ -147,7 +166,7 @@ func TestE2E_Petstore(t *testing.T) {
 		ep := findEndpoint(t, eps, "GET", "/pets")
 		handler := buildHandler(ep, c)
 		res := callTool(t, handler, map[string]any{"limit": 10, "offset": 0})
-		m := resultJSON(t, res)
+		m := resultBodyMap(t, res)
 		if m["limit"] != "10" {
 			t.Errorf("limit = %v, want 10", m["limit"])
 		}
@@ -157,7 +176,7 @@ func TestE2E_Petstore(t *testing.T) {
 		ep := findEndpoint(t, eps, "GET", "/pets")
 		handler := buildHandler(ep, c)
 		res := callTool(t, handler, map[string]any{"tags": []any{"cat", "dog"}})
-		m := resultJSON(t, res)
+		m := resultBodyMap(t, res)
 		tags, ok := m["tags"].([]any)
 		if !ok {
 			t.Fatalf("tags not an array: %v", m["tags"])
@@ -176,7 +195,7 @@ func TestE2E_Petstore(t *testing.T) {
 		if res.IsError {
 			t.Fatalf("unexpected error: %s", resultText(t, res))
 		}
-		m := resultJSON(t, res)
+		m := resultBodyMap(t, res)
 		if m["name"] != "Buddy" {
 			t.Errorf("name = %v, want Buddy", m["name"])
 		}
@@ -189,7 +208,7 @@ func TestE2E_Petstore(t *testing.T) {
 		ep := findEndpoint(t, eps, "GET", "/pets/{petId}")
 		handler := buildHandler(ep, c)
 		res := callTool(t, handler, map[string]any{"petId": "abc123"})
-		m := resultJSON(t, res)
+		m := resultBodyMap(t, res)
 		if m["id"] != "abc123" {
 			t.Errorf("id = %v, want abc123", m["id"])
 		}
@@ -202,7 +221,7 @@ func TestE2E_Petstore(t *testing.T) {
 			"petId": "abc123",
 			"body":  map[string]any{"name": "Updated"},
 		})
-		m := resultJSON(t, res)
+		m := resultBodyMap(t, res)
 		if m["name"] != "Updated" {
 			t.Errorf("name = %v, want Updated", m["name"])
 		}
@@ -218,9 +237,15 @@ func TestE2E_Petstore(t *testing.T) {
 		if res.IsError {
 			t.Fatalf("unexpected error: %s", resultText(t, res))
 		}
-		m := resultJSON(t, res)
-		if m["status"] != "ok" {
-			t.Errorf("status = %v, want ok", m["status"])
+		env := resultJSON(t, res)
+		// Envelope status is the HTTP status code (float64 in JSON).
+		if env["status"] != float64(204) {
+			t.Errorf("status = %v, want 204", env["status"])
+		}
+		// Body should contain {"status": "ok"} from the 204 handler.
+		body := resultBodyMap(t, res)
+		if body["status"] != "ok" {
+			t.Errorf("body.status = %v, want ok", body["status"])
 		}
 	})
 }
@@ -342,13 +367,14 @@ func TestE2E_EdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("CookieParam_NotInSchema", func(t *testing.T) {
+	t.Run("CookieParam_InSchema", func(t *testing.T) {
 		ep := findEndpoint(t, eps, "GET", "/items/{id}")
 		schema := buildInputSchema(ep)
-		if _, ok := schema.Properties["session"]; ok {
-			t.Error("cookie param 'session' should not appear in schema")
+		// Cookie params are now exposed as top-level properties.
+		if _, ok := schema.Properties["session"]; !ok {
+			t.Error("cookie param 'session' should appear in schema")
 		}
-		// Verify path param is still there
+		// Verify path param is still there.
 		if _, ok := schema.Properties["id"]; !ok {
 			t.Error("path param 'id' missing from schema")
 		}
@@ -403,16 +429,12 @@ func TestE2E_EdgeCases(t *testing.T) {
 	t.Run("PathParam_SpecialChars_Substituted", func(t *testing.T) {
 		ep := findEndpoint(t, eps, "GET", "/data/{key}")
 		handler := buildHandler(ep, c)
-		// url.PathEscape encodes a/b → a%2Fb in the URL string,
-		// but Go's HTTP client normalizes paths — the server may see
-		// the decoded form. What matters: the request succeeds and
-		// the value arrives.
 		res := callTool(t, handler, map[string]any{"key": "hello-world"})
 		if res.IsError {
 			t.Fatalf("unexpected error: %s", resultText(t, res))
 		}
-		m := resultJSON(t, res)
-		path := m["path"].(string)
+		body := resultBodyMap(t, res)
+		path := body["path"].(string)
 		if path != "/data/hello-world" {
 			t.Errorf("path = %q, want /data/hello-world", path)
 		}
@@ -425,10 +447,9 @@ func TestE2E_EdgeCases(t *testing.T) {
 		if res.IsError {
 			t.Fatalf("unexpected error: %s", resultText(t, res))
 		}
-		m := resultJSON(t, res)
+		body := resultBodyMap(t, res)
 		// Go's net/http decodes %20 back to space in r.URL.Path.
-		// What matters: the value arrives correctly and the request succeeds.
-		path := m["path"].(string)
+		path := body["path"].(string)
 		if path != "/data/hello world" {
 			t.Errorf("path = %q, want /data/hello world", path)
 		}
@@ -494,37 +515,43 @@ func TestE2E_ResponseHandling(t *testing.T) {
 			t.Fatalf("unexpected error: %s", resultText(t, res))
 		}
 		text := resultText(t, res)
-		// Non-JSON response is returned as a string, then formatResult
-		// JSON-encodes it — so HTML chars are escaped. Verify the content
-		// is present in some form.
 		if !strings.Contains(text, "Hello HTML") {
 			t.Errorf("text = %q, want to contain 'Hello HTML'", text)
 		}
 	})
 
-	t.Run("201_EmptyBody_StatusOk", func(t *testing.T) {
+	t.Run("201_EmptyBody_EnvelopeFormat", func(t *testing.T) {
 		ep := findEndpoint(t, eps, "POST", "/created")
 		handler := buildHandler(ep, c)
 		res := callTool(t, handler, map[string]any{"body": map[string]any{"name": "test"}})
 		if res.IsError {
 			t.Fatalf("unexpected error: %s", resultText(t, res))
 		}
-		m := resultJSON(t, res)
-		if m["status"] != "ok" {
-			t.Errorf("status = %v, want ok", m["status"])
+		env := resultJSON(t, res)
+		// Envelope status is HTTP status code (float64 in JSON).
+		if env["status"] != float64(201) {
+			t.Errorf("envelope status = %v, want 201", env["status"])
+		}
+		body := resultBodyMap(t, res)
+		if body["status"] != "ok" {
+			t.Errorf("body.status = %v, want ok", body["status"])
 		}
 	})
 
-	t.Run("202_EmptyBody_StatusOk", func(t *testing.T) {
+	t.Run("202_EmptyBody_EnvelopeFormat", func(t *testing.T) {
 		ep := findEndpoint(t, eps, "POST", "/accepted")
 		handler := buildHandler(ep, c)
 		res := callTool(t, handler, map[string]any{"body": map[string]any{"task": "process"}})
 		if res.IsError {
 			t.Fatalf("unexpected error: %s", resultText(t, res))
 		}
-		m := resultJSON(t, res)
-		if m["status"] != "ok" {
-			t.Errorf("status = %v, want ok", m["status"])
+		env := resultJSON(t, res)
+		if env["status"] != float64(202) {
+			t.Errorf("envelope status = %v, want 202", env["status"])
+		}
+		body := resultBodyMap(t, res)
+		if body["status"] != "ok" {
+			t.Errorf("body.status = %v, want ok", body["status"])
 		}
 	})
 

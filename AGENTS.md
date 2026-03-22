@@ -32,8 +32,13 @@ Go CLI that converts OpenAPI 3.x specs into MCP stdio servers dynamically — on
 - Auth priority: static token > OIDC from disk > no auth (warning)
 - Tokens stored at `~/.mcp-openapi-proxy/{prefix}-tokens.json` with 0600 perms
 - Header params exposed as top-level properties in tool input schema, injected as HTTP headers
+- Cookie params exposed as top-level properties in tool input schema, forwarded as Cookie header
 - Request body nested under `"body"` key in tool input schema
 - GET tools → readOnly annotation, DELETE tools → destructive annotation
+- Tool OutputSchema derived from first 2xx response with JSON schema (must be type "object" per MCP spec)
+- Tool description enriched with [DEPRECATED] flag, response codes, auth scheme details, external docs URL
+- Handler response wrapped in envelope: `{status, content_type, headers, body}`
+- `client.Do()` returns `*client.Response` with StatusCode, Headers, ContentType, Body
 - stdio transport only
 
 ## Gotchas
@@ -41,7 +46,8 @@ Go CLI that converts OpenAPI 3.x specs into MCP stdio servers dynamically — on
 - `jsonschema-go` uses `json.RawMessage` for Default field
 - kin-openapi `SchemaRef.Value.Type` returns `*openapi3.Types` (slice), not a string — use `.Slice()`
 - Version hardcoded as `0.1.0` in `server.go`
-- Cookie parameters are not supported — logged as warning, ignored
+- Cookie parameters are parsed and forwarded as Cookie header (logged as warning)
+- `go-sdk` requires OutputSchema type to be "object" — non-object schemas wrapped in `{items: ...}` or `{data: ...}`
 - `multipart/form-data` and `application/x-www-form-urlencoded` bodies are skipped
 - Path param values are URL-encoded; array query params use repeated keys
 - Non-JSON API responses returned as raw text strings

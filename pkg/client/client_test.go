@@ -26,16 +26,19 @@ func TestDo_GET_MethodAndPath(t *testing.T) {
 		"GET /items": testutil.JSONHandler(200, map[string]string{"ok": "true"}),
 	})
 	c := New(srv.URL, testutil.MockTokenProvider("tok"), nil)
-	result, err := c.Do(context.Background(), http.MethodGet, "/items", nil, nil)
+	resp, err := c.Do(context.Background(), http.MethodGet, "/items", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	m, ok := result.(map[string]any)
+	m, ok := resp.Body.(map[string]any)
 	if !ok {
-		t.Fatalf("expected map, got %T", result)
+		t.Fatalf("expected map, got %T", resp.Body)
 	}
 	if m["ok"] != "true" {
 		t.Errorf("expected ok=true, got %v", m["ok"])
+	}
+	if resp.StatusCode != 200 {
+		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -158,16 +161,19 @@ func TestDo_200_JSON(t *testing.T) {
 		"GET /data": testutil.JSONHandler(200, map[string]any{"key": "val", "num": 42.0}),
 	})
 	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	result, err := c.Get(context.Background(), "/data")
+	resp, err := c.Get(context.Background(), "/data")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	m := result.(map[string]any)
+	m := resp.Body.(map[string]any)
 	if m["key"] != "val" {
 		t.Errorf("key = %v, want val", m["key"])
 	}
 	if m["num"] != 42.0 {
 		t.Errorf("num = %v, want 42", m["num"])
+	}
+	if resp.StatusCode != 200 {
+		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -176,13 +182,16 @@ func TestDo_204_NoContent(t *testing.T) {
 		"DELETE /item": testutil.EmptyHandler(204),
 	})
 	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	result, err := c.Delete(context.Background(), "/item")
+	resp, err := c.Delete(context.Background(), "/item")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	m := result.(map[string]any)
+	m := resp.Body.(map[string]any)
 	if m["status"] != "ok" {
 		t.Errorf("expected status=ok, got %v", m["status"])
+	}
+	if resp.StatusCode != 204 {
+		t.Errorf("StatusCode = %d, want 204", resp.StatusCode)
 	}
 }
 
@@ -191,13 +200,13 @@ func TestDo_201_EmptyBody(t *testing.T) {
 		"POST /items": testutil.EmptyHandler(201),
 	})
 	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	result, err := c.Post(context.Background(), "/items", map[string]string{"name": "x"})
+	resp, err := c.Post(context.Background(), "/items", map[string]string{"name": "x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v (BUG A8: 201 empty body should return status ok)", err)
 	}
-	m, ok := result.(map[string]any)
+	m, ok := resp.Body.(map[string]any)
 	if !ok {
-		t.Fatalf("expected map, got %T", result)
+		t.Fatalf("expected map, got %T", resp.Body)
 	}
 	if m["status"] != "ok" {
 		t.Errorf("expected status=ok, got %v", m["status"])
@@ -209,13 +218,13 @@ func TestDo_202_EmptyBody(t *testing.T) {
 		"POST /jobs": testutil.EmptyHandler(202),
 	})
 	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	result, err := c.Post(context.Background(), "/jobs", map[string]string{"cmd": "run"})
+	resp, err := c.Post(context.Background(), "/jobs", map[string]string{"cmd": "run"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v (BUG A8: 202 empty body should return status ok)", err)
 	}
-	m, ok := result.(map[string]any)
+	m, ok := resp.Body.(map[string]any)
 	if !ok {
-		t.Fatalf("expected map, got %T", result)
+		t.Fatalf("expected map, got %T", resp.Body)
 	}
 	if m["status"] != "ok" {
 		t.Errorf("expected status=ok, got %v", m["status"])
@@ -227,16 +236,19 @@ func TestDo_200_TextPlain(t *testing.T) {
 		"GET /health": testutil.TextHandler(200, "healthy"),
 	})
 	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	result, err := c.Get(context.Background(), "/health")
+	resp, err := c.Get(context.Background(), "/health")
 	if err != nil {
 		t.Fatalf("unexpected error: %v (BUG A7: text/plain should return raw string)", err)
 	}
-	s, ok := result.(string)
+	s, ok := resp.Body.(string)
 	if !ok {
-		t.Fatalf("expected string, got %T", result)
+		t.Fatalf("expected string, got %T", resp.Body)
 	}
 	if s != "healthy" {
 		t.Errorf("result = %q, want %q", s, "healthy")
+	}
+	if resp.ContentType != "text/plain" {
+		t.Errorf("ContentType = %q, want text/plain", resp.ContentType)
 	}
 }
 
@@ -249,13 +261,13 @@ func TestDo_200_TextHTML(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	result, err := c.Get(context.Background(), "/page")
+	resp, err := c.Get(context.Background(), "/page")
 	if err != nil {
 		t.Fatalf("unexpected error: %v (BUG A7: text/html should return raw string)", err)
 	}
-	s, ok := result.(string)
+	s, ok := resp.Body.(string)
 	if !ok {
-		t.Fatalf("expected string, got %T", result)
+		t.Fatalf("expected string, got %T", resp.Body)
 	}
 	if s != "<h1>Hello</h1>" {
 		t.Errorf("result = %q, want %q", s, "<h1>Hello</h1>")
@@ -383,11 +395,11 @@ func TestGet_DelegatesToDo(t *testing.T) {
 		"GET /x": testutil.JSONHandler(200, map[string]string{"m": "get"}),
 	})
 	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	result, err := c.Get(context.Background(), "/x")
+	resp, err := c.Get(context.Background(), "/x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	m := result.(map[string]any)
+	m := resp.Body.(map[string]any)
 	if m["m"] != "get" {
 		t.Errorf("expected get, got %v", m["m"])
 	}
@@ -398,11 +410,11 @@ func TestPost_DelegatesToDo(t *testing.T) {
 		"POST /x": testutil.JSONHandler(200, map[string]string{"m": "post"}),
 	})
 	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	result, err := c.Post(context.Background(), "/x", map[string]string{"k": "v"})
+	resp, err := c.Post(context.Background(), "/x", map[string]string{"k": "v"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	m := result.(map[string]any)
+	m := resp.Body.(map[string]any)
 	if m["m"] != "post" {
 		t.Errorf("expected post, got %v", m["m"])
 	}
@@ -413,11 +425,11 @@ func TestPut_DelegatesToDo(t *testing.T) {
 		"PUT /x": testutil.JSONHandler(200, map[string]string{"m": "put"}),
 	})
 	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	result, err := c.Put(context.Background(), "/x", map[string]string{"k": "v"})
+	resp, err := c.Put(context.Background(), "/x", map[string]string{"k": "v"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	m := result.(map[string]any)
+	m := resp.Body.(map[string]any)
 	if m["m"] != "put" {
 		t.Errorf("expected put, got %v", m["m"])
 	}
@@ -428,11 +440,11 @@ func TestPatch_DelegatesToDo(t *testing.T) {
 		"PATCH /x": testutil.JSONHandler(200, map[string]string{"m": "patch"}),
 	})
 	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	result, err := c.Patch(context.Background(), "/x", map[string]string{"k": "v"})
+	resp, err := c.Patch(context.Background(), "/x", map[string]string{"k": "v"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	m := result.(map[string]any)
+	m := resp.Body.(map[string]any)
 	if m["m"] != "patch" {
 		t.Errorf("expected patch, got %v", m["m"])
 	}
@@ -443,13 +455,34 @@ func TestDelete_DelegatesToDo(t *testing.T) {
 		"DELETE /x": testutil.JSONHandler(200, map[string]string{"m": "delete"}),
 	})
 	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	result, err := c.Delete(context.Background(), "/x")
+	resp, err := c.Delete(context.Background(), "/x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	m := result.(map[string]any)
+	m := resp.Body.(map[string]any)
 	if m["m"] != "delete" {
 		t.Errorf("expected delete, got %v", m["m"])
+	}
+}
+
+// --- Response metadata ---
+
+func TestDo_ResponseHeaders_Captured(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Custom-Header", "custom-value")
+		w.WriteHeader(200)
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
+	resp, err := c.Get(context.Background(), "/x")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Headers["X-Custom-Header"] != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", resp.Headers["X-Custom-Header"])
 	}
 }
 

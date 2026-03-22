@@ -1,0 +1,333 @@
+openapi: "3.0.3"
+info:
+  title: Full Contract API
+  description: Comprehensive API spec covering all OpenAPI features for e2e testing.
+  version: "1.0.0"
+  contact:
+    url: https://api.example.com/docs
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: JWT bearer token
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key sent as header
+    apiKeyCookie:
+      type: apiKey
+      in: cookie
+      name: session_id
+      description: Session cookie for admin endpoints
+
+  schemas:
+    Item:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+            - active
+            - archived
+        created_at:
+          type: string
+          format: date-time
+
+    NewItem:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        status:
+          type: string
+          enum:
+            - active
+            - archived
+          default: active
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+
+    Stats:
+      type: object
+      properties:
+        total_items:
+          type: integer
+        active_items:
+          type: integer
+
+    Report:
+      type: object
+      properties:
+        title:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+
+paths:
+  /items:
+    get:
+      summary: List items with pagination
+      operationId: listItems
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - active
+              - archived
+        - name: X-Request-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: session
+          in: cookie
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list of items
+          headers:
+            X-Total-Count:
+              description: Total number of items
+              schema:
+                type: integer
+            X-Page:
+              description: Current page number
+              schema:
+                type: integer
+            Link:
+              description: Pagination links (RFC 5988)
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Item"
+        "401":
+          description: Not authenticated
+      security:
+        - bearerAuth: []
+
+    post:
+      summary: Create a new item
+      operationId: createItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewItem"
+      responses:
+        "201":
+          description: Item created
+          headers:
+            Location:
+              description: URL of the created item
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - bearerAuth: []
+
+  /items/{id}:
+    get:
+      summary: Get item by ID
+      operationId: getItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Item details
+          headers:
+            ETag:
+              description: Entity tag for caching
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+        "404":
+          description: Item not found
+
+    put:
+      summary: Update an item (use PATCH instead)
+      operationId: updateItem
+      deprecated: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewItem"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Item not found
+
+    patch:
+      summary: Partially update an item
+      operationId: patchItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                status:
+                  type: string
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+        "404":
+          description: Item not found
+
+    delete:
+      summary: Delete an item
+      operationId: deleteItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Item deleted
+        "404":
+          description: Item not found
+      security:
+        - apiKeyHeader: []
+
+  /admin/stats:
+    get:
+      summary: Get admin statistics
+      operationId: getStats
+      responses:
+        "200":
+          description: Usage statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+      security:
+        - apiKeyCookie: []
+
+  /export:
+    get:
+      summary: Export data as CSV
+      operationId: exportData
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /ping:
+    get:
+      summary: Health check
+      operationId: ping
+      responses:
+        "204":
+          description: Pong (no body)
+
+  /report:
+    get:
+      summary: Get report in JSON or PDF
+      operationId: getReport
+      externalDocs:
+        description: Report API documentation
+        url: https://api.example.com/docs/reports
+      responses:
+        "200":
+          description: Report data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"

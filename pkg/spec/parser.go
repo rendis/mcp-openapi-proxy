@@ -14,6 +14,31 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
+// ResponseInfo describes a single HTTP response from the spec.
+type ResponseInfo struct {
+	StatusCode  string
+	Description string
+	ContentType string
+	Schema      map[string]any
+	Headers     []ResponseHeader
+}
+
+// ResponseHeader describes a header returned in a response.
+type ResponseHeader struct {
+	Name        string
+	Description string
+	Required    bool
+	Type        string
+}
+
+// SecurityInfo describes a security scheme with its full details.
+type SecurityInfo struct {
+	Name   string
+	Type   string
+	In     string
+	Scheme string
+}
+
 // Endpoint represents a parsed API endpoint from the spec.
 type Endpoint struct {
 	Method       string       // GET, POST, PUT, PATCH, DELETE
@@ -25,8 +50,13 @@ type Endpoint struct {
 	PathParams   []Param      // path parameters
 	QueryParams  []Param      // query parameters
 	HeaderParams []Param      // header parameters
+	CookieParams []Param      // cookie parameters
 	RequestBody  *RequestBody // body schema (nil for GET/DELETE)
-	Security     []string     // security scheme names
+	Security     []string     // security scheme names (backward compat)
+	Deprecated   bool         // whether the operation is deprecated
+	Responses    []ResponseInfo
+	SecurityInfo []SecurityInfo
+	ExternalDocs string // URL to external documentation
 }
 
 // Param describes an API parameter.
@@ -160,8 +190,20 @@ func extractEndpoints(doc *openapi3.T) []Endpoint {
 				case openapi3.ParameterInHeader:
 					ep.HeaderParams = append(ep.HeaderParams, param)
 				case openapi3.ParameterInCookie:
-					log.Printf("warning: cookie parameter %q on %s %s is not supported and will be ignored", p.Name, method, path)
+					log.Printf("warning: cookie parameter %q on %s %s — included but may need manual handling", p.Name, method, path)
+					ep.CookieParams = append(ep.CookieParams, param)
 				}
+			}
+
+			// Deprecated flag
+			ep.Deprecated = op.Deprecated
+
+			// Responses
+			ep.Responses = extractResponses(op)
+
+			// External docs
+			if op.ExternalDocs != nil && op.ExternalDocs.URL != "" {
+				ep.ExternalDocs = op.ExternalDocs.URL
 			}
 
 			// Request body
@@ -179,6 +221,9 @@ func extractEndpoints(doc *openapi3.T) []Endpoint {
 
 			// Security
 			ep.Security = extractSecurityNames(op.Security, doc.Security)
+
+			// SecurityInfo (full details)
+			ep.SecurityInfo = extractSecurityInfo(op.Security, doc.Security, doc)
 
 			endpoints = append(endpoints, ep)
 		}
@@ -309,6 +354,114 @@ func extractSecurityNames(opSecurity *openapi3.SecurityRequirements, docSecurity
 		}
 	}
 	return names
+}
+
+// extractResponses builds ResponseInfo slices from an operation's Responses.
+func extractResponses(op *openapi3.Operation) []ResponseInfo {
+	if op.Responses == nil {
+		return nil
+	}
+
+	// Collect status codes in sorted order for deterministic output.
+	respMap := op.Responses.Map()
+	codes := make([]string, 0, len(respMap))
+	for code := range respMap {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+
+	var results []ResponseInfo
+	for _, code := range codes {
+		respRef := respMap[code]
+		if respRef == nil || respRef.Value == nil {
+			continue
+		}
+		resp := respRef.Value
+
+		ri := ResponseInfo{
+			StatusCode:  code,
+			Description: *resp.Description,
+		}
+
+		// Extract response headers.
+		for hdrName, hdrRef := range resp.Headers {
+			if hdrRef == nil || hdrRef.Value == nil {
+				continue
+			}
+			hdr := hdrRef.Value
+			rh := ResponseHeader{
+				Name:        hdrName,
+				Description: hdr.Description,
+				Required:    hdr.Required,
+				Type:        schemaType(hdr.Schema),
+			}
+			ri.Headers = append(ri.Headers, rh)
+		}
+		// Sort headers for deterministic output.
+		sort.Slice(ri.Headers, func(i, j int) bool {
+			return ri.Headers[i].Name < ri.Headers[j].Name
+		})
+
+		// Extract schema from content (prefer application/json).
+		if resp.Content != nil {
+			for _, ct := range []string{"application/json", "application/merge-patch+json"} {
+				mt := resp.Content[ct]
+				if mt != nil && mt.Schema != nil {
+					ri.ContentType = ct
+					ri.Schema = schemaRefToMap(mt.Schema)
+					break
+				}
+			}
+			// Fallback: first available content type.
+			if ri.ContentType == "" {
+				for ct, mt := range resp.Content {
+					if mt != nil && mt.Schema != nil {
+						ri.ContentType = ct
+						ri.Schema = schemaRefToMap(mt.Schema)
+						break
+					}
+				}
+			}
+		}
+
+		results = append(results, ri)
+	}
+	return results
+}
+
+// extractSecurityInfo collects full security scheme details from an operation,
+// falling back to the document-level security.
+func extractSecurityInfo(opSecurity *openapi3.SecurityRequirements, docSecurity openapi3.SecurityRequirements, doc *openapi3.T) []SecurityInfo {
+	reqs := docSecurity
+	if opSecurity != nil {
+		reqs = *opSecurity
+	}
+
+	var infos []SecurityInfo
+	seen := make(map[string]bool)
+	for _, req := range reqs {
+		for name := range req {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+
+			si := SecurityInfo{Name: name}
+
+			// Look up scheme details from components.
+			if doc.Components != nil && doc.Components.SecuritySchemes != nil {
+				if schemeRef, ok := doc.Components.SecuritySchemes[name]; ok && schemeRef != nil && schemeRef.Value != nil {
+					scheme := schemeRef.Value
+					si.Type = scheme.Type
+					si.In = scheme.In
+					si.Scheme = scheme.Scheme
+				}
+			}
+
+			infos = append(infos, si)
+		}
+	}
+	return infos
 }
 
 // isHTTP returns true if the source starts with http:// or https://.

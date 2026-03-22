@@ -14,6 +14,23 @@ import (
 	"github.com/rendis/mcp-openapi-proxy/pkg/auth"
 )
 
+// Response wraps the HTTP response with parsed body and metadata.
+type Response struct {
+	StatusCode  int
+	Headers     map[string]string
+	ContentType string
+	Body        any
+}
+
+// flattenHeaders extracts single-valued headers from http.Header.
+func flattenHeaders(h http.Header) map[string]string {
+	m := make(map[string]string, len(h))
+	for k := range h {
+		m[k] = h.Get(k)
+	}
+	return m
+}
+
 // Client is a generic HTTP client with bearer-token auth and extra headers.
 type Client struct {
 	baseURL       string
@@ -43,7 +60,7 @@ func New(baseURL string, tp auth.TokenProvider, extraHeaders map[string]string) 
 // optional body. The path is appended to the base URL as-is.
 // reqHeaders are per-request headers (e.g. from OpenAPI header parameters)
 // that are merged on top of the client's extra headers.
-func (c *Client) Do(ctx context.Context, method, path string, body any, reqHeaders map[string]string) (any, error) {
+func (c *Client) Do(ctx context.Context, method, path string, body any, reqHeaders map[string]string) (*Response, error) {
 	var bodyReader io.Reader
 	var contentType string
 
@@ -62,59 +79,86 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, reqHeade
 	}
 	defer resp.Body.Close()
 
+	ct := resp.Header.Get("Content-Type")
+	hdrs := flattenHeaders(resp.Header)
+
 	if resp.StatusCode == http.StatusNoContent {
-		return map[string]any{"status": "ok"}, nil
+		return &Response{
+			StatusCode:  resp.StatusCode,
+			Headers:     hdrs,
+			ContentType: ct,
+			Body:        map[string]any{"status": "ok"},
+		}, nil
 	}
 	if resp.StatusCode >= 400 {
 		return nil, parseAPIError(resp)
 	}
 
 	// A7: Non-JSON responses — return raw text instead of trying to JSON decode.
-	ct := resp.Header.Get("Content-Type")
 	if !strings.Contains(ct, "json") {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("read response body: %w", err)
 		}
 		if len(body) == 0 {
-			return map[string]any{"status": "ok"}, nil
+			return &Response{
+				StatusCode:  resp.StatusCode,
+				Headers:     hdrs,
+				ContentType: ct,
+				Body:        map[string]any{"status": "ok"},
+			}, nil
 		}
-		return string(body), nil
+		return &Response{
+			StatusCode:  resp.StatusCode,
+			Headers:     hdrs,
+			ContentType: ct,
+			Body:        string(body),
+		}, nil
 	}
 
 	// A8: Empty body on 2xx — return {"status": "ok"} instead of EOF error.
 	result, err := decodeJSON(resp)
 	if err != nil {
 		if errors.Is(err, io.EOF) || resp.ContentLength == 0 {
-			return map[string]any{"status": "ok"}, nil
+			return &Response{
+				StatusCode:  resp.StatusCode,
+				Headers:     hdrs,
+				ContentType: ct,
+				Body:        map[string]any{"status": "ok"},
+			}, nil
 		}
 		return nil, err
 	}
-	return result, nil
+	return &Response{
+		StatusCode:  resp.StatusCode,
+		Headers:     hdrs,
+		ContentType: ct,
+		Body:        result,
+	}, nil
 }
 
 // Get performs a GET request.
-func (c *Client) Get(ctx context.Context, path string) (any, error) {
+func (c *Client) Get(ctx context.Context, path string) (*Response, error) {
 	return c.Do(ctx, http.MethodGet, path, nil, nil)
 }
 
 // Post performs a POST request with a JSON body.
-func (c *Client) Post(ctx context.Context, path string, body any) (any, error) {
+func (c *Client) Post(ctx context.Context, path string, body any) (*Response, error) {
 	return c.Do(ctx, http.MethodPost, path, body, nil)
 }
 
 // Put performs a PUT request with a JSON body.
-func (c *Client) Put(ctx context.Context, path string, body any) (any, error) {
+func (c *Client) Put(ctx context.Context, path string, body any) (*Response, error) {
 	return c.Do(ctx, http.MethodPut, path, body, nil)
 }
 
 // Patch performs a PATCH request with a JSON body.
-func (c *Client) Patch(ctx context.Context, path string, body any) (any, error) {
+func (c *Client) Patch(ctx context.Context, path string, body any) (*Response, error) {
 	return c.Do(ctx, http.MethodPatch, path, body, nil)
 }
 
 // Delete performs a DELETE request.
-func (c *Client) Delete(ctx context.Context, path string) (any, error) {
+func (c *Client) Delete(ctx context.Context, path string) (*Response, error) {
 	return c.Do(ctx, http.MethodDelete, path, nil, nil)
 }
 

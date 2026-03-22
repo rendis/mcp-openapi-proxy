@@ -39,20 +39,116 @@ func GenerateTools(srv *mcp.Server, endpoints []spec.Endpoint, c *client.Client,
 // buildTool constructs the MCP Tool definition from an endpoint.
 func buildTool(ep spec.Endpoint, prefix string) *mcp.Tool {
 	name := toolName(prefix, ep.Method, ep.Path)
-
-	desc := fmt.Sprintf("%s %s", ep.Method, ep.Path)
-	if ep.Summary != "" {
-		desc += " — " + ep.Summary
-	}
-
+	desc := buildDescription(ep)
 	inputSchema := buildInputSchema(ep)
+	outputSchema := buildOutputSchema(ep)
 
 	return &mcp.Tool{
-		Name:        name,
-		Description: desc,
-		InputSchema: inputSchema,
-		Annotations: toolAnnotations(ep.Method),
+		Name:         name,
+		Description:  desc,
+		InputSchema:  inputSchema,
+		OutputSchema: outputSchema,
+		Annotations:  toolAnnotations(ep.Method),
 	}
+}
+
+// buildDescription creates a rich description including deprecated flag,
+// response codes, auth info, and external docs.
+func buildDescription(ep spec.Endpoint) string {
+	var parts []string
+
+	// Deprecated flag
+	if ep.Deprecated {
+		parts = append(parts, "[DEPRECATED]")
+	}
+
+	// Method and path
+	methodPath := fmt.Sprintf("%s %s", ep.Method, ep.Path)
+	if ep.Summary != "" {
+		methodPath += " -- " + ep.Summary
+	}
+	parts = append(parts, methodPath)
+
+	// Response codes
+	if len(ep.Responses) > 0 {
+		var codes []string
+		for _, r := range ep.Responses {
+			codes = append(codes, r.StatusCode+": "+r.Description)
+		}
+		parts = append(parts, "Responses: "+strings.Join(codes, ", "))
+	}
+
+	// Security info
+	if len(ep.SecurityInfo) > 0 {
+		var schemes []string
+		for _, si := range ep.SecurityInfo {
+			s := si.Name
+			if si.Type != "" {
+				s += "(" + si.Type
+				if si.Scheme != "" {
+					s += "/" + si.Scheme
+				}
+				if si.In != "" {
+					s += " in " + si.In
+				}
+				s += ")"
+			}
+			schemes = append(schemes, s)
+		}
+		parts = append(parts, "Auth: "+strings.Join(schemes, ", "))
+	}
+
+	// External docs
+	if ep.ExternalDocs != "" {
+		parts = append(parts, "Docs: "+ep.ExternalDocs)
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+// buildOutputSchema creates a JSON Schema from the first 2xx response with a JSON schema.
+// Per MCP spec, OutputSchema.Type must be "object". Array schemas are wrapped.
+func buildOutputSchema(ep spec.Endpoint) *jsonschema.Schema {
+	for _, r := range ep.Responses {
+		// Only consider 2xx responses.
+		if len(r.StatusCode) != 3 || r.StatusCode[0] != '2' {
+			continue
+		}
+		if r.Schema == nil {
+			continue
+		}
+
+		s := mapToJSONSchema(r.Schema)
+		if s == nil {
+			continue
+		}
+
+		// MCP spec requires OutputSchema type to be "object".
+		// If the response schema is an array, wrap it.
+		schemaType := s.Type
+		if schemaType == "" && len(s.Types) > 0 {
+			schemaType = s.Types[0]
+		}
+		if schemaType == "array" {
+			wrapper := &jsonschema.Schema{
+				Type:       "object",
+				Properties: map[string]*jsonschema.Schema{"items": s},
+			}
+			return wrapper
+		}
+
+		// Ensure object type for non-array schemas.
+		if schemaType != "object" {
+			wrapper := &jsonschema.Schema{
+				Type:       "object",
+				Properties: map[string]*jsonschema.Schema{"data": s},
+			}
+			return wrapper
+		}
+
+		return s
+	}
+	return nil
 }
 
 // toolAnnotations returns read-only / destructive hints based on the HTTP method.
@@ -132,6 +228,15 @@ func buildInputSchema(ep spec.Endpoint) *jsonschema.Schema {
 		if isReservedHeader(p.Name) {
 			continue
 		}
+		propSchema := paramToSchema(p)
+		schema.Properties[p.Name] = propSchema
+		if p.Required {
+			required = append(required, p.Name)
+		}
+	}
+
+	// Cookie parameters as top-level properties.
+	for _, p := range ep.CookieParams {
 		propSchema := paramToSchema(p)
 		schema.Properties[p.Name] = propSchema
 		if p.Required {
@@ -260,16 +365,26 @@ func buildHandler(ep spec.Endpoint, c *client.Client) mcp.ToolHandler {
 		}
 
 		// Collect header parameters (excluding reserved HTTP headers).
-		var reqHeaders map[string]string
-		if len(ep.HeaderParams) > 0 {
-			reqHeaders = make(map[string]string, len(ep.HeaderParams))
-			for _, p := range ep.HeaderParams {
-				if isReservedHeader(p.Name) {
-					continue
-				}
+		reqHeaders := make(map[string]string)
+		for _, p := range ep.HeaderParams {
+			if isReservedHeader(p.Name) {
+				continue
+			}
+			if val, ok := args[p.Name]; ok {
+				reqHeaders[p.Name] = fmt.Sprintf("%v", val)
+			}
+		}
+
+		// Collect cookie parameters into a Cookie header.
+		if len(ep.CookieParams) > 0 {
+			var cookieParts []string
+			for _, p := range ep.CookieParams {
 				if val, ok := args[p.Name]; ok {
-					reqHeaders[p.Name] = fmt.Sprintf("%v", val)
+					cookieParts = append(cookieParts, fmt.Sprintf("%s=%v", p.Name, val))
 				}
+			}
+			if len(cookieParts) > 0 {
+				reqHeaders["Cookie"] = strings.Join(cookieParts, "; ")
 			}
 		}
 
@@ -282,7 +397,7 @@ func buildHandler(ep spec.Endpoint, c *client.Client) mcp.ToolHandler {
 		}
 
 		// Call the API.
-		result, err := c.Do(ctx, ep.Method, path, body, reqHeaders)
+		resp, err := c.Do(ctx, ep.Method, path, body, reqHeaders)
 		if err != nil {
 			return &mcp.CallToolResult{
 				IsError: true,
@@ -292,10 +407,18 @@ func buildHandler(ep spec.Endpoint, c *client.Client) mcp.ToolHandler {
 			}, nil
 		}
 
+		// Wrap response as envelope with status, content_type, headers, body.
+		envelope := map[string]any{
+			"status":       resp.StatusCode,
+			"content_type": resp.ContentType,
+			"headers":      resp.Headers,
+			"body":         resp.Body,
+		}
+
 		// Format result as JSON text.
-		text, jsonErr := formatResult(result)
+		text, jsonErr := formatResult(envelope)
 		if jsonErr != nil {
-			text = fmt.Sprintf("%v", result)
+			text = fmt.Sprintf("%v", envelope)
 		}
 
 		return &mcp.CallToolResult{
