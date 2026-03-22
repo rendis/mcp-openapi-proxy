@@ -3,13 +3,15 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/rendis/mcp-openapi-proxy/pkg/auth"
 	"github.com/rendis/mcp-openapi-proxy/pkg/server"
+	"github.com/rendis/mcp-openapi-proxy/pkg/spec"
 )
 
-const tokenPrefix = "mcp-openapi-proxy"
+const tokenPrefix = "default"
 
 func main() {
 	cmd := "serve"
@@ -45,31 +47,34 @@ func runServe() error {
 		return fmt.Errorf("MCP_SPEC environment variable is required (path or URL to OpenAPI spec)")
 	}
 
-	baseURL := os.Getenv("MCP_BASE_URL")
-	if baseURL == "" {
-		return fmt.Errorf("MCP_BASE_URL environment variable is required (API base URL)")
-	}
-
 	toolPrefix := os.Getenv("MCP_TOOL_PREFIX")
 	if toolPrefix == "" {
 		toolPrefix = "api"
 	}
 
-	tp := resolveTokenProvider()
 	extraHeaders := parseExtraHeaders(os.Getenv("MCP_EXTRA_HEADERS"))
-
-	cfg := server.Config{
-		SpecSource: specSource,
-		BaseURL:    baseURL,
-		ToolPrefix: toolPrefix,
+	maxBodyBytes, err := parseInt64Env("MCP_MAX_BODY_BYTES", 10<<20)
+	if err != nil {
+		return err
 	}
 
-	return server.Run(cfg, tp, extraHeaders)
+	cfg := server.Config{
+		SpecSource:        specSource,
+		BaseURL:           strings.TrimRight(os.Getenv("MCP_BASE_URL"), "/"),
+		ToolPrefix:        toolPrefix,
+		ExcludeDeprecated: parseBoolEnv("MCP_EXCLUDE_DEPRECATED"),
+		AllowInsecureHTTP: parseBoolEnv("MCP_ALLOW_INSECURE_HTTP"),
+		MaxBodyBytes:      maxBodyBytes,
+		AuthProfile:       resolveAuthProfile(toolPrefix),
+	}
+
+	return server.Run(cfg, extraHeaders)
 }
 
 func runLogin() error {
 	cfg := auth.LoginConfig{
-		TokenPrefix: tokenPrefix,
+		TokenPrefix: resolveAuthProfile(os.Getenv("MCP_TOOL_PREFIX")),
+		Scopes:      resolveOIDCScopes(),
 	}
 
 	issuer := os.Getenv("MCP_OIDC_ISSUER")
@@ -95,34 +100,11 @@ func runLogin() error {
 }
 
 func runLogout() error {
-	return auth.RunLogout(tokenPrefix)
+	return auth.RunLogout(resolveAuthProfile(os.Getenv("MCP_TOOL_PREFIX")))
 }
 
 func runStatus() error {
-	return auth.RunStatus(tokenPrefix)
-}
-
-// resolveTokenProvider resolves the token provider from environment variables.
-// Priority:
-//  1. MCP_AUTH_TOKEN → StaticTokenProvider
-//  2. OIDC tokens from disk → OIDCTokenProvider
-//  3. Fallback → empty token with warning
-func resolveTokenProvider() auth.TokenProvider {
-	// Static token (dev mode).
-	if token := os.Getenv("MCP_AUTH_TOKEN"); token != "" {
-		return auth.NewStaticTokenProvider(token)
-	}
-
-	// OIDC tokens from disk.
-	filePath := auth.TokenFilePath(tokenPrefix)
-	tp, err := auth.NewOIDCTokenProvider(filePath)
-	if err == nil {
-		return tp
-	}
-
-	// Fallback: warn and use empty token.
-	fmt.Fprintf(os.Stderr, "warning: no auth token configured (set MCP_AUTH_TOKEN or run login)\n")
-	return auth.NewStaticTokenProvider("")
+	return auth.RunStatus(resolveAuthProfile(os.Getenv("MCP_TOOL_PREFIX")))
 }
 
 // parseExtraHeaders parses a comma-separated list of key:value pairs.
@@ -149,4 +131,70 @@ func parseExtraHeaders(raw string) map[string]string {
 	}
 
 	return headers
+}
+
+// resolveTokenProvider is kept as a compatibility helper for tests. Runtime
+// auth is resolved per-endpoint in the server package.
+func resolveTokenProvider() auth.TokenProvider {
+	if token := strings.TrimSpace(os.Getenv("MCP_AUTH_TOKEN")); token != "" {
+		return auth.NewStaticTokenProvider(token)
+	}
+	profile := resolveAuthProfile(os.Getenv("MCP_TOOL_PREFIX"))
+	tp, err := auth.NewOIDCTokenProvider(auth.TokenFilePath(profile))
+	if err == nil {
+		return tp
+	}
+	fmt.Fprintf(os.Stderr, "warning: no auth token configured (set MCP_AUTH_TOKEN or run login)\n")
+	return auth.NewStaticTokenProvider("")
+}
+
+func resolveAuthProfile(toolPrefix string) string {
+	if profile := strings.TrimSpace(os.Getenv("MCP_AUTH_PROFILE")); profile != "" {
+		return profile
+	}
+	if toolPrefix != "" {
+		return toolPrefix
+	}
+	return "default"
+}
+
+func resolveOIDCScopes() string {
+	if scopes := strings.TrimSpace(os.Getenv("MCP_OIDC_SCOPES")); scopes != "" {
+		return scopes
+	}
+	specSource := strings.TrimSpace(os.Getenv("MCP_SPEC"))
+	if specSource == "" {
+		return ""
+	}
+	_, doc, err := spec.LoadSpec(specSource)
+	if err != nil || doc == nil {
+		return ""
+	}
+	scopes := spec.CollectOAuthScopes(doc)
+	if len(scopes) == 0 {
+		return ""
+	}
+	return strings.Join(scopes, " ")
+}
+
+func parseBoolEnv(name string) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseInt64Env(name string, defaultValue int64) (int64, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", name)
+	}
+	return n, nil
 }

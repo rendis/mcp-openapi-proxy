@@ -3,198 +3,199 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/rendis/mcp-openapi-proxy/pkg/auth"
+	"unicode/utf8"
 )
+
+const defaultMaxBodyBytes int64 = 10 << 20
+
+// BinaryBody is the canonical binary envelope returned by the proxy.
+type BinaryBody struct {
+	Encoding   string `json:"encoding"`
+	DataBase64 string `json:"data_base64"`
+	SizeBytes  int    `json:"size_bytes"`
+}
+
+// Request describes a fully materialized outbound HTTP request.
+type Request struct {
+	Method               string
+	URL                  string
+	Headers              http.Header
+	Body                 []byte
+	ExpectedContentTypes []string
+}
 
 // Response wraps the HTTP response with parsed body and metadata.
 type Response struct {
-	StatusCode  int
-	Headers     map[string]string
-	ContentType string
-	Body        any
+	StatusCode     int
+	Headers        map[string][]string
+	ContentType    string
+	RawContentType string
+	Body           any
 }
 
-// flattenHeaders extracts single-valued headers from http.Header.
-func flattenHeaders(h http.Header) map[string]string {
-	m := make(map[string]string, len(h))
-	for k := range h {
-		m[k] = h.Get(k)
-	}
-	return m
-}
-
-// Client is a generic HTTP client with bearer-token auth and extra headers.
+// Client is a thin HTTP transport with global headers and bounded response
+// bodies. It deliberately does not resolve authentication.
 type Client struct {
-	baseURL       string
-	tokenProvider auth.TokenProvider
-	extraHeaders  map[string]string
-	httpClient    *http.Client
+	extraHeaders map[string]string
+	httpClient   *http.Client
+	maxBodyBytes int64
 }
 
-// New creates a Client pointing at the given API base URL.
-// extraHeaders are applied to every request (e.g. {"X-Workspace": "abc"}).
-func New(baseURL string, tp auth.TokenProvider, extraHeaders map[string]string) *Client {
+// New creates a client with the provided extra headers and body limit.
+func New(extraHeaders map[string]string, maxBodyBytes int64) *Client {
 	if extraHeaders == nil {
-		extraHeaders = make(map[string]string)
+		extraHeaders = map[string]string{}
 	}
-	baseURL = strings.TrimRight(baseURL, "/")
+	if maxBodyBytes <= 0 {
+		maxBodyBytes = defaultMaxBodyBytes
+	}
 	return &Client{
-		baseURL:       baseURL,
-		tokenProvider: tp,
-		extraHeaders:  extraHeaders,
+		extraHeaders: extraHeaders,
+		maxBodyBytes: maxBodyBytes,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
 }
 
-// Do performs an HTTP request to the given path with the specified method and
-// optional body. The path is appended to the base URL as-is.
-// reqHeaders are per-request headers (e.g. from OpenAPI header parameters)
-// that are merged on top of the client's extra headers.
-func (c *Client) Do(ctx context.Context, method, path string, body any, reqHeaders map[string]string) (*Response, error) {
+// Do performs the request and returns the decoded response body, regardless of
+// the HTTP status code. Transport and decoding failures are returned as errors.
+func (c *Client) Do(ctx context.Context, req *Request) (*Response, error) {
+	if req == nil {
+		return nil, fmt.Errorf("request is required")
+	}
+
 	var bodyReader io.Reader
-	var contentType string
-
-	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("marshal request body: %w", err)
-		}
-		bodyReader = bytes.NewReader(data)
-		contentType = "application/json"
+	if len(req.Body) > 0 {
+		bodyReader = bytes.NewReader(req.Body)
 	}
 
-	resp, err := c.do(ctx, method, path, bodyReader, contentType, reqHeaders)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	ct := resp.Header.Get("Content-Type")
-	hdrs := flattenHeaders(resp.Header)
-
-	if resp.StatusCode == http.StatusNoContent {
-		return &Response{
-			StatusCode:  resp.StatusCode,
-			Headers:     hdrs,
-			ContentType: ct,
-			Body:        map[string]any{"status": "ok"},
-		}, nil
-	}
-	if resp.StatusCode >= 400 {
-		return nil, parseAPIError(resp)
-	}
-
-	// A7: Non-JSON responses — return raw text instead of trying to JSON decode.
-	if !strings.Contains(ct, "json") {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("read response body: %w", err)
-		}
-		if len(body) == 0 {
-			return &Response{
-				StatusCode:  resp.StatusCode,
-				Headers:     hdrs,
-				ContentType: ct,
-				Body:        map[string]any{"status": "ok"},
-			}, nil
-		}
-		return &Response{
-			StatusCode:  resp.StatusCode,
-			Headers:     hdrs,
-			ContentType: ct,
-			Body:        string(body),
-		}, nil
-	}
-
-	// A8: Empty body on 2xx — return {"status": "ok"} instead of EOF error.
-	result, err := decodeJSON(resp)
-	if err != nil {
-		if errors.Is(err, io.EOF) || resp.ContentLength == 0 {
-			return &Response{
-				StatusCode:  resp.StatusCode,
-				Headers:     hdrs,
-				ContentType: ct,
-				Body:        map[string]any{"status": "ok"},
-			}, nil
-		}
-		return nil, err
-	}
-	return &Response{
-		StatusCode:  resp.StatusCode,
-		Headers:     hdrs,
-		ContentType: ct,
-		Body:        result,
-	}, nil
-}
-
-// Get performs a GET request.
-func (c *Client) Get(ctx context.Context, path string) (*Response, error) {
-	return c.Do(ctx, http.MethodGet, path, nil, nil)
-}
-
-// Post performs a POST request with a JSON body.
-func (c *Client) Post(ctx context.Context, path string, body any) (*Response, error) {
-	return c.Do(ctx, http.MethodPost, path, body, nil)
-}
-
-// Put performs a PUT request with a JSON body.
-func (c *Client) Put(ctx context.Context, path string, body any) (*Response, error) {
-	return c.Do(ctx, http.MethodPut, path, body, nil)
-}
-
-// Patch performs a PATCH request with a JSON body.
-func (c *Client) Patch(ctx context.Context, path string, body any) (*Response, error) {
-	return c.Do(ctx, http.MethodPatch, path, body, nil)
-}
-
-// Delete performs a DELETE request.
-func (c *Client) Delete(ctx context.Context, path string) (*Response, error) {
-	return c.Do(ctx, http.MethodDelete, path, nil, nil)
-}
-
-func (c *Client) do(ctx context.Context, method, path string, body io.Reader, contentType string, reqHeaders map[string]string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	token, err := c.tokenProvider.Token(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("obtain auth token: %w", err)
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-
 	for k, v := range c.extraHeaders {
-		req.Header.Set(k, v)
+		httpReq.Header.Set(k, v)
+	}
+	for k, values := range req.Headers {
+		httpReq.Header.Del(k)
+		for _, value := range values {
+			httpReq.Header.Add(k, value)
+		}
 	}
 
-	// Per-request headers (e.g. from OpenAPI header parameters) override extras.
-	for k, v := range reqHeaders {
-		req.Header.Set(k, v)
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := c.readBody(resp.Body)
+	if err != nil {
+		return nil, err
 	}
 
-	return c.httpClient.Do(req)
+	rawContentType := resp.Header.Get("Content-Type")
+	contentType := selectContentType(rawContentType, req.ExpectedContentTypes)
+
+	return &Response{
+		StatusCode:     resp.StatusCode,
+		Headers:        cloneHeaders(resp.Header),
+		ContentType:    contentType,
+		RawContentType: rawContentType,
+		Body:           decodeBody(contentType, bodyBytes),
+	}, nil
 }
 
-func decodeJSON(resp *http.Response) (any, error) {
-	var result any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+func (c *Client) readBody(r io.Reader) ([]byte, error) {
+	limited := io.LimitReader(r, c.maxBodyBytes+1)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
 	}
-	return result, nil
+	if int64(len(body)) > c.maxBodyBytes {
+		return nil, &BodyTooLargeError{Limit: c.maxBodyBytes}
+	}
+	return body, nil
+}
+
+func decodeBody(contentType string, body []byte) any {
+	if len(body) == 0 {
+		return nil
+	}
+
+	if isJSONContentType(contentType) {
+		var decoded any
+		if err := json.Unmarshal(body, &decoded); err == nil {
+			return decoded
+		}
+	}
+
+	if isTextContentType(contentType) || (contentType == "" && utf8.Valid(body)) {
+		return string(body)
+	}
+
+	return BinaryBody{
+		Encoding:   "base64",
+		DataBase64: base64.StdEncoding.EncodeToString(body),
+		SizeBytes:  len(body),
+	}
+}
+
+func selectContentType(raw string, expected []string) string {
+	if raw != "" {
+		mediaType, _, err := mime.ParseMediaType(raw)
+		if err == nil {
+			return mediaType
+		}
+		return raw
+	}
+	if len(expected) == 0 {
+		return ""
+	}
+	return expected[0]
+}
+
+func isJSONContentType(contentType string) bool {
+	contentType = strings.ToLower(contentType)
+	return contentType == "application/json" || strings.HasSuffix(contentType, "+json")
+}
+
+func isTextContentType(contentType string) bool {
+	contentType = strings.ToLower(contentType)
+	switch {
+	case strings.HasPrefix(contentType, "text/"):
+		return true
+	case contentType == "application/xml":
+		return true
+	case strings.HasSuffix(contentType, "+xml"):
+		return true
+	case contentType == "application/javascript":
+		return true
+	case contentType == "application/x-yaml":
+		return true
+	case contentType == "application/yaml":
+		return true
+	case contentType == "application/csv":
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneHeaders(h http.Header) map[string][]string {
+	out := make(map[string][]string, len(h))
+	for k, values := range h {
+		out[k] = append([]string(nil), values...)
+	}
+	return out
 }

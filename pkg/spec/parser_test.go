@@ -1,9 +1,7 @@
 package spec
 
 import (
-	"bytes"
 	"encoding/json"
-	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,537 +9,281 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// ── test helpers (inline to avoid import cycle with testutil) ─────────
-
-func minimalSpec(t *testing.T, paths map[string]*openapi3.PathItem) *openapi3.T {
-	t.Helper()
-	doc := &openapi3.T{
-		OpenAPI: "3.0.3",
-		Info:    &openapi3.Info{Title: "Test API", Version: "1.0.0"},
-		Paths:   &openapi3.Paths{},
-	}
-	for p, item := range paths {
-		doc.Paths.Set(p, item)
-	}
-	return doc
-}
-
-func writeSpecFile(t *testing.T, doc *openapi3.T) string {
+func writeDoc(t *testing.T, doc *openapi3.T) string {
 	t.Helper()
 	data, err := json.Marshal(doc)
 	if err != nil {
-		t.Fatalf("marshal spec: %v", err)
+		t.Fatalf("marshal doc: %v", err)
 	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "spec.json")
+	path := filepath.Join(t.TempDir(), "spec.json")
 	if err := os.WriteFile(path, data, 0644); err != nil {
-		t.Fatalf("write spec file: %v", err)
+		t.Fatalf("write spec: %v", err)
 	}
 	return path
 }
 
-func simplePathItem(method string, op *openapi3.Operation) *openapi3.PathItem {
-	item := &openapi3.PathItem{}
-	switch method {
-	case "GET":
-		item.Get = op
-	case "POST":
-		item.Post = op
-	case "PUT":
-		item.Put = op
-	case "PATCH":
-		item.Patch = op
-	case "DELETE":
-		item.Delete = op
+func validOperation(summary string) *openapi3.Operation {
+	return &openapi3.Operation{
+		Summary: summary,
+		Responses: openapi3.NewResponses(
+			openapi3.WithStatus(200, &openapi3.ResponseRef{
+				Value: &openapi3.Response{
+					Description: openapi3.Ptr("OK"),
+				},
+			}),
+		),
 	}
-	return item
 }
 
-func simpleOp(summary string, params ...*openapi3.ParameterRef) *openapi3.Operation {
-	return &openapi3.Operation{Summary: summary, Parameters: params}
-}
+func TestLoadSpec_StrictValidation(t *testing.T) {
+	valid := &openapi3.T{
+		OpenAPI: "3.0.3",
+		Info:    &openapi3.Info{Title: "Test", Version: "1.0.0"},
+		Paths:   &openapi3.Paths{},
+	}
+	valid.Paths.Set("/health", &openapi3.PathItem{Get: validOperation("health")})
 
-func pathParamRef(name, typ string, required bool) *openapi3.ParameterRef {
-	return &openapi3.ParameterRef{Value: &openapi3.Parameter{
-		Name: name, In: "path", Required: required,
-		Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{typ}}},
-	}}
-}
-
-func queryParamRef(name, typ string, required bool) *openapi3.ParameterRef {
-	return &openapi3.ParameterRef{Value: &openapi3.Parameter{
-		Name: name, In: "query", Required: required,
-		Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{typ}}},
-	}}
-}
-
-func headerParamRef(name, typ string, required bool) *openapi3.ParameterRef {
-	return &openapi3.ParameterRef{Value: &openapi3.Parameter{
-		Name: name, In: "header", Required: required,
-		Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{typ}}},
-	}}
-}
-
-func cookieParamRef(name, typ string, required bool) *openapi3.ParameterRef {
-	return &openapi3.ParameterRef{Value: &openapi3.Parameter{
-		Name: name, In: "cookie", Required: required,
-		Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{typ}}},
-	}}
-}
-
-// ── LoadSpec ─────────────────────────────────────────────────────────
-
-func TestLoadSpec_LocalJSONFile(t *testing.T) {
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{
-		"/pets": simplePathItem("GET", simpleOp("List pets")),
-	})
-	path := writeSpecFile(t, doc)
-
-	endpoints, loaded, err := LoadSpec(path)
+	endpoints, _, err := LoadSpec(writeDoc(t, valid))
 	if err != nil {
-		t.Fatalf("LoadSpec: %v", err)
-	}
-	if loaded == nil {
-		t.Fatal("expected non-nil doc")
+		t.Fatalf("LoadSpec(valid): %v", err)
 	}
 	if len(endpoints) != 1 {
 		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
 	}
-	ep := endpoints[0]
-	if ep.Method != "GET" || ep.Path != "/pets" {
-		t.Errorf("unexpected endpoint: %s %s", ep.Method, ep.Path)
+
+	invalid := &openapi3.T{
+		OpenAPI: "3.0.3",
+		Info:    &openapi3.Info{Title: "Broken", Version: "1.0.0"},
+		Paths:   &openapi3.Paths{},
 	}
-	if ep.Summary != "List pets" {
-		t.Errorf("expected summary 'List pets', got %q", ep.Summary)
+	invalid.Paths.Set("/broken", &openapi3.PathItem{Get: &openapi3.Operation{Summary: "broken"}})
+
+	if _, _, err := LoadSpec(writeDoc(t, invalid)); err == nil {
+		t.Fatal("expected validation error for invalid spec")
 	}
 }
 
-func TestLoadSpec_InvalidFile(t *testing.T) {
-	_, _, err := LoadSpec("/tmp/does-not-exist-xyz.json")
-	if err == nil {
-		t.Fatal("expected error for missing file")
+func TestExtractEndpoints_CapturesServerPrecedenceAndMethods(t *testing.T) {
+	doc := &openapi3.T{
+		OpenAPI: "3.0.3",
+		Info:    &openapi3.Info{Title: "Servers", Version: "1.0.0"},
+		Servers: openapi3.Servers{
+			&openapi3.Server{URL: "https://root.example.com"},
+		},
+		Paths: &openapi3.Paths{},
 	}
-}
 
-func TestLoadSpec_MinimalOneEndpoint(t *testing.T) {
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{
-		"/health": simplePathItem("GET", simpleOp("Health check")),
-	})
-	path := writeSpecFile(t, doc)
-
-	endpoints, _, err := LoadSpec(path)
-	if err != nil {
-		t.Fatalf("LoadSpec: %v", err)
+	pathItem := &openapi3.PathItem{
+		Servers: openapi3.Servers{
+			&openapi3.Server{URL: "https://path.example.com"},
+		},
+		Get: validOperation("get"),
+		Head: &openapi3.Operation{
+			Summary: "head",
+			Servers: &openapi3.Servers{
+				&openapi3.Server{URL: "https://op.example.com"},
+			},
+			Responses: openapi3.NewResponses(
+				openapi3.WithStatus(204, &openapi3.ResponseRef{
+					Value: &openapi3.Response{Description: openapi3.Ptr("No Content")},
+				}),
+			),
+		},
+		Options: validOperation("options"),
 	}
-	if len(endpoints) != 1 {
-		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
-	}
-}
-
-// ── extractEndpoints ─────────────────────────────────────────────────
-
-func TestExtractEndpoints_AllHTTPMethods(t *testing.T) {
-	op := &openapi3.Operation{Summary: "op"}
-	item := &openapi3.PathItem{
-		Get: op, Post: op, Put: op, Patch: op, Delete: op,
-	}
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{"/res": item})
-
-	endpoints := extractEndpoints(doc)
-	if len(endpoints) != 5 {
-		t.Fatalf("expected 5 endpoints, got %d", len(endpoints))
-	}
-	methods := map[string]bool{}
-	for _, ep := range endpoints {
-		methods[ep.Method] = true
-	}
-	for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
-		if !methods[m] {
-			t.Errorf("missing method %s", m)
-		}
-	}
-}
-
-func TestExtractEndpoints_PathsSorted(t *testing.T) {
-	op := &openapi3.Operation{Summary: "op"}
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{
-		"/zebra": simplePathItem("GET", op),
-		"/alpha": simplePathItem("GET", op),
-		"/mid":   simplePathItem("GET", op),
-	})
+	doc.Paths.Set("/items", pathItem)
 
 	endpoints := extractEndpoints(doc)
 	if len(endpoints) != 3 {
 		t.Fatalf("expected 3 endpoints, got %d", len(endpoints))
 	}
-	if endpoints[0].Path != "/alpha" || endpoints[1].Path != "/mid" || endpoints[2].Path != "/zebra" {
-		t.Errorf("paths not sorted: %s, %s, %s", endpoints[0].Path, endpoints[1].Path, endpoints[2].Path)
+
+	find := func(method string) Endpoint {
+		t.Helper()
+		for _, ep := range endpoints {
+			if ep.Method == method {
+				return ep
+			}
+		}
+		t.Fatalf("method %s not found", method)
+		return Endpoint{}
+	}
+
+	if got := find("GET").BaseURL; got != "https://path.example.com" {
+		t.Fatalf("GET baseURL = %q, want path server", got)
+	}
+	if got := find("HEAD").BaseURL; got != "https://op.example.com" {
+		t.Fatalf("HEAD baseURL = %q, want op server", got)
+	}
+	if got := find("OPTIONS").BaseURL; got != "https://path.example.com" {
+		t.Fatalf("OPTIONS baseURL = %q, want path server", got)
 	}
 }
 
-func TestExtractEndpoints_MergesPathAndOpParams(t *testing.T) {
-	pathParams := openapi3.Parameters{
-		pathParamRef("id", "string", true),
-		queryParamRef("page", "integer", false),
+func TestExtractEndpoints_CapturesParameterSchemasAndExamples(t *testing.T) {
+	doc := &openapi3.T{
+		OpenAPI: "3.0.3",
+		Info:    &openapi3.Info{Title: "Params", Version: "1.0.0"},
+		Paths:   &openapi3.Paths{},
 	}
-	opParams := openapi3.Parameters{
-		queryParamRef("page", "integer", true), // overrides path-level
-	}
-	op := &openapi3.Operation{Summary: "with params", Parameters: opParams}
-	item := &openapi3.PathItem{Parameters: pathParams, Get: op}
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{"/items/{id}": item})
+
+	explode := true
+	doc.Paths.Set("/search", &openapi3.PathItem{
+		Get: &openapi3.Operation{
+			Summary: "search",
+			Parameters: openapi3.Parameters{
+				&openapi3.ParameterRef{Value: &openapi3.Parameter{
+					Name:          "filters",
+					In:            "query",
+					Style:         "deepObject",
+					Explode:       &explode,
+					AllowReserved: true,
+					Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{
+						Type: &openapi3.Types{"object"},
+						Properties: openapi3.Schemas{
+							"status": &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"string"}}},
+						},
+						Nullable: true,
+					}},
+					Example: map[string]any{"status": "active"},
+				}},
+			},
+			Responses: openapi3.NewResponses(
+				openapi3.WithStatus(200, &openapi3.ResponseRef{
+					Value: &openapi3.Response{Description: openapi3.Ptr("OK")},
+				}),
+			),
+		},
+	})
 
 	endpoints := extractEndpoints(doc)
 	if len(endpoints) != 1 {
 		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
 	}
-	ep := endpoints[0]
-	if len(ep.PathParams) != 1 || ep.PathParams[0].Name != "id" {
-		t.Errorf("expected path param 'id', got %+v", ep.PathParams)
+	param := endpoints[0].QueryParams[0]
+	if param.Style != "deepObject" || !param.Explode || !param.AllowReserved {
+		t.Fatalf("unexpected serialization metadata: %+v", param)
 	}
-	if len(ep.QueryParams) != 1 {
-		t.Fatalf("expected 1 query param, got %d", len(ep.QueryParams))
+	types, ok := param.Schema["type"].([]any)
+	if !ok || len(types) != 2 {
+		t.Fatalf("expected nullable schema type union, got %#v", param.Schema["type"])
 	}
-	if !ep.QueryParams[0].Required {
-		t.Error("expected query param 'page' to be required (op-level override)")
+	if _, ok := param.Schema["examples"].([]any); !ok {
+		t.Fatalf("expected examples on normalized schema, got %#v", param.Schema)
 	}
 }
 
-func TestExtractEndpoints_NilPaths(t *testing.T) {
+func TestExtractRequestBodyAndResponses_PreserveMediaTypes(t *testing.T) {
 	doc := &openapi3.T{
 		OpenAPI: "3.0.3",
-		Info:    &openapi3.Info{Title: "empty", Version: "1.0.0"},
+		Info:    &openapi3.Info{Title: "Bodies", Version: "1.0.0"},
+		Paths:   &openapi3.Paths{},
 	}
-	endpoints := extractEndpoints(doc)
-	if endpoints != nil {
-		t.Errorf("expected nil for nil paths, got %v", endpoints)
-	}
-}
-
-// ── Parameter handling ───────────────────────────────────────────────
-
-func TestExtractEndpoints_PathParamsCaptured(t *testing.T) {
-	op := simpleOp("get item", pathParamRef("id", "string", true))
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{
-		"/items/{id}": simplePathItem("GET", op),
-	})
-	endpoints := extractEndpoints(doc)
-	if len(endpoints[0].PathParams) != 1 {
-		t.Fatalf("expected 1 path param, got %d", len(endpoints[0].PathParams))
-	}
-	p := endpoints[0].PathParams[0]
-	if p.Name != "id" || p.Type != "string" || !p.Required {
-		t.Errorf("unexpected path param: %+v", p)
-	}
-}
-
-func TestExtractEndpoints_QueryParamsCaptured(t *testing.T) {
-	op := simpleOp("search", queryParamRef("q", "string", true))
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{
-		"/search": simplePathItem("GET", op),
-	})
-	endpoints := extractEndpoints(doc)
-	if len(endpoints[0].QueryParams) != 1 {
-		t.Fatalf("expected 1 query param, got %d", len(endpoints[0].QueryParams))
-	}
-	p := endpoints[0].QueryParams[0]
-	if p.Name != "q" || p.Type != "string" || !p.Required {
-		t.Errorf("unexpected query param: %+v", p)
-	}
-}
-
-func TestExtractEndpoints_HeaderParamsCaptured(t *testing.T) {
-	op := simpleOp("with header", headerParamRef("X-Trace", "string", false))
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{
-		"/trace": simplePathItem("GET", op),
-	})
-	endpoints := extractEndpoints(doc)
-	if len(endpoints[0].HeaderParams) != 1 {
-		t.Fatalf("expected 1 header param, got %d", len(endpoints[0].HeaderParams))
-	}
-	p := endpoints[0].HeaderParams[0]
-	if p.Name != "X-Trace" || p.Type != "string" {
-		t.Errorf("unexpected header param: %+v", p)
-	}
-}
-
-func TestExtractEndpoints_CookieParamWarning(t *testing.T) {
-	op := simpleOp("with cookie", cookieParamRef("session", "string", false))
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{
-		"/me": simplePathItem("GET", op),
-	})
-
-	// Capture log output to verify warning.
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
-
-	_ = extractEndpoints(doc)
-
-	output := buf.String()
-	if len(output) == 0 {
-		t.Error("expected warning on stderr for cookie parameter, got nothing")
-	}
-	if !bytes.Contains(buf.Bytes(), []byte("cookie")) {
-		t.Errorf("expected warning to mention 'cookie', got: %s", output)
-	}
-}
-
-// ── extractBodySchema ────────────────────────────────────────────────
-
-func TestExtractBodySchema_PrefersJSON(t *testing.T) {
-	rb := &openapi3.RequestBody{
-		Content: openapi3.Content{
-			"application/xml": &openapi3.MediaType{
-				Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}},
+	doc.Paths.Set("/upload", &openapi3.PathItem{
+		Post: &openapi3.Operation{
+			Summary: "upload",
+			RequestBody: &openapi3.RequestBodyRef{
+				Value: &openapi3.RequestBody{
+					Required: true,
+					Content: openapi3.Content{
+						"multipart/form-data": &openapi3.MediaType{
+							Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{
+								Type: &openapi3.Types{"object"},
+								Properties: openapi3.Schemas{
+									"file": &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"string"}, Format: "binary"}},
+								},
+							}},
+						},
+						"application/json": &openapi3.MediaType{
+							Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}},
+						},
+					},
+				},
 			},
-			"application/json": &openapi3.MediaType{
-				Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}},
+			Responses: openapi3.NewResponses(
+				openapi3.WithStatus(200, &openapi3.ResponseRef{
+					Value: &openapi3.Response{
+						Description: openapi3.Ptr("OK"),
+						Content: openapi3.Content{
+							"text/plain":       &openapi3.MediaType{Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"string"}}}},
+							"application/json": &openapi3.MediaType{Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}}},
+						},
+						Headers: openapi3.Headers{
+							"X-Trace": &openapi3.HeaderRef{Value: &openapi3.Header{Parameter: openapi3.Parameter{
+								Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"string"}}},
+							}}},
+						},
+					},
+				}),
+			),
+		},
+	})
+
+	endpoints := extractEndpoints(doc)
+	body := endpoints[0].RequestBody
+	if body == nil || len(body.Content) != 2 {
+		t.Fatalf("expected 2 request media types, got %#v", body)
+	}
+	if body.Content[0].ContentType != "application/json" {
+		t.Fatalf("expected deterministic request media type ordering, got %#v", body.Content)
+	}
+
+	resp := endpoints[0].Responses[0]
+	if len(resp.Content) != 2 {
+		t.Fatalf("expected 2 response media types, got %#v", resp)
+	}
+	if resp.Content[0].ContentType != "application/json" {
+		t.Fatalf("expected deterministic response media type ordering, got %#v", resp.Content)
+	}
+	if len(resp.Headers) != 1 || resp.Headers[0].Name != "X-Trace" {
+		t.Fatalf("expected response header extraction, got %#v", resp.Headers)
+	}
+}
+
+func TestExtractSecurityRequirementsAndScopes(t *testing.T) {
+	doc := &openapi3.T{
+		OpenAPI: "3.0.3",
+		Info:    &openapi3.Info{Title: "Auth", Version: "1.0.0"},
+		Components: &openapi3.Components{
+			SecuritySchemes: openapi3.SecuritySchemes{
+				"bearerAuth": &openapi3.SecuritySchemeRef{Value: &openapi3.SecurityScheme{Type: "http", Scheme: "bearer"}},
+				"apiKey":     &openapi3.SecuritySchemeRef{Value: &openapi3.SecurityScheme{Type: "apiKey", In: "header", Name: "X-API-Key"}},
 			},
 		},
-	}
-	ct, schema := extractBodySchema(rb)
-	if ct != "application/json" {
-		t.Errorf("expected application/json, got %s", ct)
-	}
-	if schema == nil {
-		t.Error("expected non-nil schema")
-	}
-}
-
-func TestExtractBodySchema_PrefersMergePatchJSON(t *testing.T) {
-	rb := &openapi3.RequestBody{
-		Content: openapi3.Content{
-			"application/xml": &openapi3.MediaType{
-				Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}},
-			},
-			"application/merge-patch+json": &openapi3.MediaType{
-				Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}},
-			},
+		Security: openapi3.SecurityRequirements{
+			openapi3.SecurityRequirement{"bearerAuth": []string{"read:items"}},
 		},
+		Paths: &openapi3.Paths{},
 	}
-	ct, schema := extractBodySchema(rb)
-	if ct != "application/merge-patch+json" {
-		t.Errorf("expected application/merge-patch+json, got %s", ct)
-	}
-	if schema == nil {
-		t.Error("expected non-nil schema")
-	}
-}
-
-func TestExtractBodySchema_SkipsMultipart(t *testing.T) {
-	rb := &openapi3.RequestBody{
-		Content: openapi3.Content{
-			"multipart/form-data": &openapi3.MediaType{
-				Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}},
+	doc.Paths.Set("/items", &openapi3.PathItem{
+		Get: &openapi3.Operation{
+			Summary: "items",
+			Security: &openapi3.SecurityRequirements{
+				openapi3.SecurityRequirement{"apiKey": []string{}},
+				openapi3.SecurityRequirement{},
 			},
+			Responses: openapi3.NewResponses(
+				openapi3.WithStatus(200, &openapi3.ResponseRef{
+					Value: &openapi3.Response{Description: openapi3.Ptr("OK")},
+				}),
+			),
 		},
-	}
-	ct, schema := extractBodySchema(rb)
-	if ct != "" || schema != nil {
-		t.Errorf("expected empty result for multipart-only, got ct=%q schema=%v", ct, schema)
-	}
-}
-
-func TestExtractBodySchema_SkipsFormURLEncoded(t *testing.T) {
-	rb := &openapi3.RequestBody{
-		Content: openapi3.Content{
-			"application/x-www-form-urlencoded": &openapi3.MediaType{
-				Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}},
-			},
-		},
-	}
-	ct, schema := extractBodySchema(rb)
-	if ct != "" || schema != nil {
-		t.Errorf("expected empty result for form-urlencoded-only, got ct=%q schema=%v", ct, schema)
-	}
-}
-
-func TestExtractBodySchema_ReturnsNilForUnsupportedOnly(t *testing.T) {
-	rb := &openapi3.RequestBody{
-		Content: openapi3.Content{
-			"multipart/form-data": &openapi3.MediaType{
-				Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}},
-			},
-			"application/x-www-form-urlencoded": &openapi3.MediaType{
-				Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}},
-			},
-		},
-	}
-	ct, schema := extractBodySchema(rb)
-	if ct != "" || schema != nil {
-		t.Errorf("expected nil for unsupported-only content, got ct=%q schema=%v", ct, schema)
-	}
-}
-
-func TestExtractBodySchema_FallbackToXML(t *testing.T) {
-	rb := &openapi3.RequestBody{
-		Content: openapi3.Content{
-			"multipart/form-data": &openapi3.MediaType{
-				Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}},
-			},
-			"application/xml": &openapi3.MediaType{
-				Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}}},
-			},
-		},
-	}
-	ct, schema := extractBodySchema(rb)
-	if ct != "application/xml" {
-		t.Errorf("expected fallback to application/xml, got %q", ct)
-	}
-	if schema == nil {
-		t.Error("expected non-nil schema for XML fallback")
-	}
-}
-
-func TestExtractBodySchema_NilContent(t *testing.T) {
-	rb := &openapi3.RequestBody{Content: nil}
-	ct, schema := extractBodySchema(rb)
-	if ct != "" || schema != nil {
-		t.Errorf("expected empty for nil content, got ct=%q", ct)
-	}
-}
-
-// ── mergeParameters ──────────────────────────────────────────────────
-
-func TestMergeParameters_OpOverridesPath(t *testing.T) {
-	pathParams := openapi3.Parameters{queryParamRef("limit", "integer", false)}
-	opParams := openapi3.Parameters{queryParamRef("limit", "integer", true)}
-
-	merged := mergeParameters(pathParams, opParams)
-	if len(merged) != 1 {
-		t.Fatalf("expected 1 merged param, got %d", len(merged))
-	}
-	if !merged[0].Value.Required {
-		t.Error("expected op-level override to win (required=true)")
-	}
-}
-
-func TestMergeParameters_NilRefs(t *testing.T) {
-	pathParams := openapi3.Parameters{nil, queryParamRef("ok", "string", false)}
-	opParams := openapi3.Parameters{nil}
-
-	merged := mergeParameters(pathParams, opParams)
-	found := false
-	for _, p := range merged {
-		if p != nil && p.Value != nil && p.Value.Name == "ok" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected 'ok' param to survive merge with nil refs")
-	}
-}
-
-// ── Security ─────────────────────────────────────────────────────────
-
-func TestExtractSecurityNames_OpOverridesDoc(t *testing.T) {
-	docSecurity := openapi3.SecurityRequirements{{"api_key": {}}}
-	opSecurity := &openapi3.SecurityRequirements{{"oauth2": {}}}
-
-	names := extractSecurityNames(opSecurity, docSecurity)
-	if len(names) != 1 || names[0] != "oauth2" {
-		t.Errorf("expected [oauth2], got %v", names)
-	}
-}
-
-func TestExtractSecurityNames_FallbackToDoc(t *testing.T) {
-	docSecurity := openapi3.SecurityRequirements{{"api_key": {}}}
-
-	names := extractSecurityNames(nil, docSecurity)
-	if len(names) != 1 || names[0] != "api_key" {
-		t.Errorf("expected [api_key], got %v", names)
-	}
-}
-
-// ── Param enrichment (M2): Enum, Format, Min/Max, MinLength/MaxLength ──
-
-func TestExtractEndpoints_ParamEnumCaptured(t *testing.T) {
-	paramRef := &openapi3.ParameterRef{Value: &openapi3.Parameter{
-		Name: "status", In: "query", Required: false,
-		Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{
-			Type: &openapi3.Types{"string"},
-			Enum: []any{"active", "inactive", "pending"},
-		}},
-	}}
-	op := simpleOp("filter", paramRef)
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{
-		"/items": simplePathItem("GET", op),
 	})
 
 	endpoints := extractEndpoints(doc)
-	p := endpoints[0].QueryParams[0]
-	if len(p.Enum) != 3 {
-		t.Fatalf("expected 3 enum values, got %d", len(p.Enum))
+	reqs := endpoints[0].SecurityRequirements
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 security alternatives, got %#v", reqs)
 	}
-	if p.Enum[0] != "active" || p.Enum[1] != "inactive" || p.Enum[2] != "pending" {
-		t.Errorf("unexpected enum values: %v", p.Enum)
+	if len(reqs[0].Schemes) != 1 || reqs[0].Schemes[0].Name != "apiKey" {
+		t.Fatalf("unexpected first security requirement: %#v", reqs[0])
 	}
-}
-
-func TestExtractEndpoints_ParamFormatCaptured(t *testing.T) {
-	paramRef := &openapi3.ParameterRef{Value: &openapi3.Parameter{
-		Name: "created_at", In: "query", Required: false,
-		Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{
-			Type: &openapi3.Types{"string"}, Format: "date-time",
-		}},
-	}}
-	op := simpleOp("filter", paramRef)
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{
-		"/events": simplePathItem("GET", op),
-	})
-
-	endpoints := extractEndpoints(doc)
-	p := endpoints[0].QueryParams[0]
-	if p.Format != "date-time" {
-		t.Errorf("expected format 'date-time', got %q", p.Format)
+	if len(reqs[1].Schemes) != 0 {
+		t.Fatalf("expected anonymous alternative, got %#v", reqs[1])
 	}
-}
 
-func TestExtractEndpoints_ParamMinMaxCaptured(t *testing.T) {
-	min := float64(1)
-	max := float64(100)
-	paramRef := &openapi3.ParameterRef{Value: &openapi3.Parameter{
-		Name: "limit", In: "query", Required: false,
-		Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{
-			Type: &openapi3.Types{"integer"}, Min: &min, Max: &max,
-		}},
-	}}
-	op := simpleOp("list", paramRef)
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{
-		"/items": simplePathItem("GET", op),
-	})
-
-	endpoints := extractEndpoints(doc)
-	p := endpoints[0].QueryParams[0]
-	if p.Minimum == nil || *p.Minimum != 1 {
-		t.Errorf("expected minimum 1, got %v", p.Minimum)
-	}
-	if p.Maximum == nil || *p.Maximum != 100 {
-		t.Errorf("expected maximum 100, got %v", p.Maximum)
-	}
-}
-
-func TestExtractEndpoints_ParamMinMaxLengthCaptured(t *testing.T) {
-	minLen := uint64(3)
-	maxLen := uint64(50)
-	paramRef := &openapi3.ParameterRef{Value: &openapi3.Parameter{
-		Name: "name", In: "query", Required: false,
-		Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{
-			Type: &openapi3.Types{"string"}, MinLength: minLen, MaxLength: &maxLen,
-		}},
-	}}
-	op := simpleOp("search", paramRef)
-	doc := minimalSpec(t, map[string]*openapi3.PathItem{
-		"/search": simplePathItem("GET", op),
-	})
-
-	endpoints := extractEndpoints(doc)
-	p := endpoints[0].QueryParams[0]
-	if p.MinLength == nil || *p.MinLength != 3 {
-		t.Errorf("expected minLength 3, got %v", p.MinLength)
-	}
-	if p.MaxLength == nil || *p.MaxLength != 50 {
-		t.Errorf("expected maxLength 50, got %v", p.MaxLength)
+	scopes := CollectOAuthScopes(doc)
+	if len(scopes) != 1 || scopes[0] != "read:items" {
+		t.Fatalf("unexpected scopes: %#v", scopes)
 	}
 }

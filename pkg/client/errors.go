@@ -1,32 +1,12 @@
 package client
 
-import (
-	"fmt"
-	"io"
-	"net/http"
-)
+import "fmt"
 
-// APIError represents a parsed error response from the API.
-type APIError struct {
-	StatusCode int
-	Body       string
+// BodyTooLargeError reports a response that exceeded the configured limit.
+type BodyTooLargeError struct {
+	Limit int64
 }
 
-func (e *APIError) Error() string {
-	return fmt.Sprintf("API %d: %s", e.StatusCode, e.Body)
-}
-
-func parseAPIError(resp *http.Response) *APIError {
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return &APIError{
-			StatusCode: resp.StatusCode,
-			Body:       fmt.Sprintf("HTTP %d (failed to read body)", resp.StatusCode),
-		}
-	}
-
-	return &APIError{
-		StatusCode: resp.StatusCode,
-		Body:       string(body),
-	}
+func (e *BodyTooLargeError) Error() string {
+	return fmt.Sprintf("response body exceeds MCP_MAX_BODY_BYTES (%d bytes)", e.Limit)
 }

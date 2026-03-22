@@ -13,25 +13,27 @@ import (
 	"github.com/rendis/mcp-openapi-proxy/pkg/spec"
 )
 
-// Config for the MCP server.
+// Config controls runtime behavior for the MCP proxy.
 type Config struct {
-	SpecSource string // path or URL to OpenAPI spec
-	BaseURL    string // API base URL
-	ToolPrefix string // prefix for tool names
+	SpecSource        string
+	BaseURL           string
+	ToolPrefix        string
+	ExcludeDeprecated bool
+	AllowInsecureHTTP bool
+	MaxBodyBytes      int64
+	AuthProfile       string
 }
 
 // Run loads the spec, generates tools, and starts the MCP stdio server.
-func Run(cfg Config, tp auth.TokenProvider, extraHeaders map[string]string) error {
-	// Load OpenAPI spec.
+func Run(cfg Config, extraHeaders map[string]string) error {
 	endpoints, _, err := spec.LoadSpec(cfg.SpecSource)
 	if err != nil {
 		return fmt.Errorf("load spec: %w", err)
 	}
 
-	// Create HTTP client.
-	c := client.New(cfg.BaseURL, tp, extraHeaders)
+	httpClient := client.New(extraHeaders, cfg.MaxBodyBytes)
+	authResolver := auth.NewResolver(cfg.AuthProfile)
 
-	// Create MCP server.
 	srv := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "mcp-openapi-proxy",
@@ -40,18 +42,17 @@ func Run(cfg Config, tp auth.TokenProvider, extraHeaders map[string]string) erro
 		nil,
 	)
 
-	// Generate and register tools.
-	GenerateTools(srv, endpoints, c, cfg.ToolPrefix)
+	GenerateTools(srv, endpoints, httpClient, authResolver, cfg)
 
 	toolCount := 0
 	for _, ep := range endpoints {
-		if !ep.Deprecated {
-			toolCount++
+		if cfg.ExcludeDeprecated && ep.Deprecated {
+			continue
 		}
+		toolCount++
 	}
 	fmt.Fprintf(os.Stderr, "mcp-openapi-proxy: registered %d tools from %s\n", toolCount, cfg.SpecSource)
 
-	// Run the stdio transport.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
@@ -59,6 +60,5 @@ func Run(cfg Config, tp auth.TokenProvider, extraHeaders map[string]string) erro
 		log.Printf("MCP server error: %v", err)
 		return err
 	}
-
 	return nil
 }

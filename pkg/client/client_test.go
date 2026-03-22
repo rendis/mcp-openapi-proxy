@@ -2,517 +2,132 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-
-	"github.com/rendis/mcp-openapi-proxy/internal/testutil"
 )
 
-// errTokenProvider is a TokenProvider that always returns an error.
-type errTokenProvider struct{ err error }
-
-func (p *errTokenProvider) Token(_ context.Context) (string, error) { return "", p.err }
-
-// --- Request construction ---
-
-func TestDo_GET_MethodAndPath(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"GET /items": testutil.JSONHandler(200, map[string]string{"ok": "true"}),
-	})
-	c := New(srv.URL, testutil.MockTokenProvider("tok"), nil)
-	resp, err := c.Do(context.Background(), http.MethodGet, "/items", nil, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	m, ok := resp.Body.(map[string]any)
-	if !ok {
-		t.Fatalf("expected map, got %T", resp.Body)
-	}
-	if m["ok"] != "true" {
-		t.Errorf("expected ok=true, got %v", m["ok"])
-	}
-	if resp.StatusCode != 200 {
-		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
-	}
-}
-
-func TestDo_POST_SendsJSONBody(t *testing.T) {
-	var gotBody map[string]any
-	var gotCT string
-	var gotMethod string
+func TestClientDo_JSONResponseAndHeaders(t *testing.T) {
+	var gotRequestID string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod = r.Method
-		gotCT = r.Header.Get("Content-Type")
-		json.NewDecoder(r.Body).Decode(&gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"id": "123"})
+		gotRequestID = r.Header.Get("X-Request-Id")
+		w.Header().Add("X-Trace", "a")
+		w.Header().Add("X-Trace", "b")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"123"}`))
 	}))
-	t.Cleanup(srv.Close)
+	defer srv.Close()
 
-	c := New(srv.URL, testutil.MockTokenProvider("tok"), nil)
-	_, err := c.Do(context.Background(), http.MethodPost, "/items", map[string]string{"name": "test"}, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotMethod != "POST" {
-		t.Errorf("method = %q, want POST", gotMethod)
-	}
-	if gotCT != "application/json" {
-		t.Errorf("Content-Type = %q, want application/json", gotCT)
-	}
-	if gotBody["name"] != "test" {
-		t.Errorf("body name = %v, want test", gotBody["name"])
-	}
-}
-
-func TestDo_AuthorizationHeader_Present(t *testing.T) {
-	var gotAuth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"ok":true}`)
-	}))
-	t.Cleanup(srv.Close)
-
-	c := New(srv.URL, testutil.MockTokenProvider("my-secret"), nil)
-	_, err := c.Get(context.Background(), "/x")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotAuth != "Bearer my-secret" {
-		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer my-secret")
-	}
-}
-
-func TestDo_AuthorizationHeader_EmptyToken(t *testing.T) {
-	var gotAuth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"ok":true}`)
-	}))
-	t.Cleanup(srv.Close)
-
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	_, err := c.Get(context.Background(), "/x")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotAuth != "" {
-		t.Errorf("expected no Authorization header, got %q", gotAuth)
-	}
-}
-
-func TestDo_ExtraHeaders_Injected(t *testing.T) {
-	var gotHeader string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotHeader = r.Header.Get("X-Workspace")
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"ok":true}`)
-	}))
-	t.Cleanup(srv.Close)
-
-	c := New(srv.URL, testutil.MockTokenProvider("tok"), map[string]string{"X-Workspace": "abc"})
-	_, err := c.Get(context.Background(), "/x")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotHeader != "abc" {
-		t.Errorf("X-Workspace = %q, want %q", gotHeader, "abc")
-	}
-}
-
-func TestDo_PerRequestHeaders_Override(t *testing.T) {
-	var gotExtra, gotReq string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotExtra = r.Header.Get("X-Workspace")
-		gotReq = r.Header.Get("X-Request-Id")
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"ok":true}`)
-	}))
-	t.Cleanup(srv.Close)
-
-	c := New(srv.URL, testutil.MockTokenProvider("tok"), map[string]string{"X-Workspace": "orig"})
-	_, err := c.Do(context.Background(), http.MethodGet, "/x", nil, map[string]string{
-		"X-Workspace":  "override",
-		"X-Request-Id": "req-1",
+	c := New(map[string]string{"X-Default": "1"}, 1024)
+	resp, err := c.Do(context.Background(), &Request{
+		Method: "GET",
+		URL:    srv.URL,
+		Headers: http.Header{
+			"X-Request-Id": []string{"req-1"},
+		},
 	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("Do: %v", err)
 	}
-	if gotExtra != "override" {
-		t.Errorf("X-Workspace = %q, want %q", gotExtra, "override")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	if gotReq != "req-1" {
-		t.Errorf("X-Request-Id = %q, want %q", gotReq, "req-1")
+	if resp.ContentType != "application/json" {
+		t.Fatalf("content type = %q", resp.ContentType)
 	}
-}
-
-// --- Response handling: success ---
-
-func TestDo_200_JSON(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"GET /data": testutil.JSONHandler(200, map[string]any{"key": "val", "num": 42.0}),
-	})
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Get(context.Background(), "/data")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if gotRequestID != "req-1" {
+		t.Fatalf("X-Request-Id = %q", gotRequestID)
 	}
-	m := resp.Body.(map[string]any)
-	if m["key"] != "val" {
-		t.Errorf("key = %v, want val", m["key"])
+	body, ok := resp.Body.(map[string]any)
+	if !ok || body["id"] != "123" {
+		t.Fatalf("unexpected body: %#v", resp.Body)
 	}
-	if m["num"] != 42.0 {
-		t.Errorf("num = %v, want 42", m["num"])
-	}
-	if resp.StatusCode != 200 {
-		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
+	if len(resp.Headers["X-Trace"]) != 2 {
+		t.Fatalf("expected repeated header values, got %#v", resp.Headers["X-Trace"])
 	}
 }
 
-func TestDo_204_NoContent(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"DELETE /item": testutil.EmptyHandler(204),
-	})
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Delete(context.Background(), "/item")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	m := resp.Body.(map[string]any)
-	if m["status"] != "ok" {
-		t.Errorf("expected status=ok, got %v", m["status"])
-	}
-	if resp.StatusCode != 204 {
-		t.Errorf("StatusCode = %d, want 204", resp.StatusCode)
-	}
-}
-
-func TestDo_201_EmptyBody(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"POST /items": testutil.EmptyHandler(201),
-	})
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Post(context.Background(), "/items", map[string]string{"name": "x"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v (BUG A8: 201 empty body should return status ok)", err)
-	}
-	m, ok := resp.Body.(map[string]any)
-	if !ok {
-		t.Fatalf("expected map, got %T", resp.Body)
-	}
-	if m["status"] != "ok" {
-		t.Errorf("expected status=ok, got %v", m["status"])
-	}
-}
-
-func TestDo_202_EmptyBody(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"POST /jobs": testutil.EmptyHandler(202),
-	})
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Post(context.Background(), "/jobs", map[string]string{"cmd": "run"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v (BUG A8: 202 empty body should return status ok)", err)
-	}
-	m, ok := resp.Body.(map[string]any)
-	if !ok {
-		t.Fatalf("expected map, got %T", resp.Body)
-	}
-	if m["status"] != "ok" {
-		t.Errorf("expected status=ok, got %v", m["status"])
-	}
-}
-
-func TestDo_200_TextPlain(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"GET /health": testutil.TextHandler(200, "healthy"),
-	})
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Get(context.Background(), "/health")
-	if err != nil {
-		t.Fatalf("unexpected error: %v (BUG A7: text/plain should return raw string)", err)
-	}
-	s, ok := resp.Body.(string)
-	if !ok {
-		t.Fatalf("expected string, got %T", resp.Body)
-	}
-	if s != "healthy" {
-		t.Errorf("result = %q, want %q", s, "healthy")
-	}
-	if resp.ContentType != "text/plain" {
-		t.Errorf("ContentType = %q, want text/plain", resp.ContentType)
-	}
-}
-
-func TestDo_200_TextHTML(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		w.WriteHeader(200)
-		w.Write([]byte("<h1>Hello</h1>"))
-	}))
-	t.Cleanup(srv.Close)
-
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Get(context.Background(), "/page")
-	if err != nil {
-		t.Fatalf("unexpected error: %v (BUG A7: text/html should return raw string)", err)
-	}
-	s, ok := resp.Body.(string)
-	if !ok {
-		t.Fatalf("expected string, got %T", resp.Body)
-	}
-	if s != "<h1>Hello</h1>" {
-		t.Errorf("result = %q, want %q", s, "<h1>Hello</h1>")
-	}
-}
-
-// --- Response handling: errors ---
-
-func TestDo_400_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(400)
-		w.Write([]byte("bad request"))
-	}))
-	t.Cleanup(srv.Close)
-
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	_, err := c.Get(context.Background(), "/bad")
-	if err == nil {
-		t.Fatal("expected error for 400")
-	}
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("expected APIError, got %T: %v", err, err)
-	}
-	if apiErr.StatusCode != 400 {
-		t.Errorf("StatusCode = %d, want 400", apiErr.StatusCode)
-	}
-	if apiErr.Body != "bad request" {
-		t.Errorf("Body = %q, want %q", apiErr.Body, "bad request")
-	}
-}
-
-func TestDo_500_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
-		w.Write([]byte("internal error"))
-	}))
-	t.Cleanup(srv.Close)
-
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	_, err := c.Get(context.Background(), "/fail")
-	if err == nil {
-		t.Fatal("expected error for 500")
-	}
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("expected APIError, got %T: %v", err, err)
-	}
-	if apiErr.StatusCode != 500 {
-		t.Errorf("StatusCode = %d, want 500", apiErr.StatusCode)
-	}
-	if apiErr.Body != "internal error" {
-		t.Errorf("Body = %q, want %q", apiErr.Body, "internal error")
-	}
-}
-
-// --- URL construction ---
-
-func TestNew_TrailingSlash(t *testing.T) {
-	var gotPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"ok":true}`)
-	}))
-	t.Cleanup(srv.Close)
-
-	// baseURL with trailing slash + path with leading slash should NOT double-slash
-	c := New(srv.URL+"/", testutil.MockTokenProvider(""), nil)
-	_, err := c.Get(context.Background(), "/items")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotPath != "/items" {
-		t.Errorf("path = %q, want /items (BUG A3: double slash)", gotPath)
-	}
-}
-
-func TestNew_NoTrailingSlash(t *testing.T) {
-	var gotPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"ok":true}`)
-	}))
-	t.Cleanup(srv.Close)
-
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	_, err := c.Get(context.Background(), "/items")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotPath != "/items" {
-		t.Errorf("path = %q, want /items", gotPath)
-	}
-}
-
-// --- Content type passthrough ---
-
-func TestDo_ExplicitContentType_ViaReqHeaders(t *testing.T) {
-	var gotCT string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotCT = r.Header.Get("Content-Type")
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"ok":true}`)
-	}))
-	t.Cleanup(srv.Close)
-
-	c := New(srv.URL, testutil.MockTokenProvider("tok"), nil)
-	_, err := c.Do(context.Background(), http.MethodPost, "/upload", map[string]string{"data": "x"}, map[string]string{
-		"Content-Type": "application/xml",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotCT != "application/xml" {
-		t.Errorf("Content-Type = %q, want application/xml", gotCT)
-	}
-}
-
-// --- Helper methods ---
-
-func TestGet_DelegatesToDo(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"GET /x": testutil.JSONHandler(200, map[string]string{"m": "get"}),
-	})
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Get(context.Background(), "/x")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	m := resp.Body.(map[string]any)
-	if m["m"] != "get" {
-		t.Errorf("expected get, got %v", m["m"])
-	}
-}
-
-func TestPost_DelegatesToDo(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"POST /x": testutil.JSONHandler(200, map[string]string{"m": "post"}),
-	})
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Post(context.Background(), "/x", map[string]string{"k": "v"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	m := resp.Body.(map[string]any)
-	if m["m"] != "post" {
-		t.Errorf("expected post, got %v", m["m"])
-	}
-}
-
-func TestPut_DelegatesToDo(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"PUT /x": testutil.JSONHandler(200, map[string]string{"m": "put"}),
-	})
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Put(context.Background(), "/x", map[string]string{"k": "v"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	m := resp.Body.(map[string]any)
-	if m["m"] != "put" {
-		t.Errorf("expected put, got %v", m["m"])
-	}
-}
-
-func TestPatch_DelegatesToDo(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"PATCH /x": testutil.JSONHandler(200, map[string]string{"m": "patch"}),
-	})
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Patch(context.Background(), "/x", map[string]string{"k": "v"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	m := resp.Body.(map[string]any)
-	if m["m"] != "patch" {
-		t.Errorf("expected patch, got %v", m["m"])
-	}
-}
-
-func TestDelete_DelegatesToDo(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"DELETE /x": testutil.JSONHandler(200, map[string]string{"m": "delete"}),
-	})
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Delete(context.Background(), "/x")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	m := resp.Body.(map[string]any)
-	if m["m"] != "delete" {
-		t.Errorf("expected delete, got %v", m["m"])
-	}
-}
-
-// --- Response metadata ---
-
-func TestDo_ResponseHeaders_Captured(t *testing.T) {
+func TestClientDo_4xxIsReturnedNotRaised(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Custom-Header", "custom-value")
-		w.WriteHeader(200)
-		fmt.Fprint(w, `{"ok":true}`)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad request"}`))
 	}))
-	t.Cleanup(srv.Close)
+	defer srv.Close()
 
-	c := New(srv.URL, testutil.MockTokenProvider(""), nil)
-	resp, err := c.Get(context.Background(), "/x")
+	c := New(nil, 1024)
+	resp, err := c.Do(context.Background(), &Request{Method: "GET", URL: srv.URL})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("Do: %v", err)
 	}
-	if resp.Headers["X-Custom-Header"] != "custom-value" {
-		t.Errorf("X-Custom-Header = %q, want custom-value", resp.Headers["X-Custom-Header"])
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	body := resp.Body.(map[string]any)
+	if body["error"] != "bad request" {
+		t.Fatalf("unexpected body: %#v", resp.Body)
 	}
 }
 
-// --- Error handling ---
+func TestClientDo_TextAndBinaryResponses(t *testing.T) {
+	t.Run("text", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("hello"))
+		}))
+		defer srv.Close()
 
-func TestDo_TokenProviderError_Propagated(t *testing.T) {
-	srv := testutil.MockAPI(t, map[string]http.HandlerFunc{
-		"GET /x": testutil.JSONHandler(200, nil),
+		c := New(nil, 1024)
+		resp, err := c.Do(context.Background(), &Request{Method: "GET", URL: srv.URL})
+		if err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		if text, ok := resp.Body.(string); !ok || text != "hello" {
+			t.Fatalf("unexpected body: %#v", resp.Body)
+		}
 	})
-	providerErr := fmt.Errorf("token expired")
-	c := New(srv.URL, &errTokenProvider{err: providerErr}, nil)
-	_, err := c.Get(context.Background(), "/x")
-	if err == nil {
-		t.Fatal("expected error from token provider")
-	}
-	if !strings.Contains(err.Error(), "token expired") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "token expired")
+
+	t.Run("binary", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write([]byte{0x01, 0x02, 0x03})
+		}))
+		defer srv.Close()
+
+		c := New(nil, 1024)
+		resp, err := c.Do(context.Background(), &Request{Method: "GET", URL: srv.URL})
+		if err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		body, ok := resp.Body.(BinaryBody)
+		if !ok {
+			t.Fatalf("expected binary body wrapper, got %#v", resp.Body)
+		}
+		if body.Encoding != "base64" || body.SizeBytes != 3 {
+			t.Fatalf("unexpected binary body: %#v", body)
+		}
+	})
+}
+
+func TestSelectContentType_UsesExpectedWhenMissing(t *testing.T) {
+	if got := selectContentType("", []string{"application/json"}); got != "application/json" {
+		t.Fatalf("content type = %q", got)
 	}
 }
 
-func TestParseAPIError_ExtractsStatusAndBody(t *testing.T) {
-	resp := &http.Response{
-		StatusCode: 422,
-		Body:       io.NopCloser(strings.NewReader(`{"error":"invalid"}`)),
-	}
-	apiErr := parseAPIError(resp)
-	if apiErr.StatusCode != 422 {
-		t.Errorf("StatusCode = %d, want 422", apiErr.StatusCode)
-	}
-	if apiErr.Body != `{"error":"invalid"}` {
-		t.Errorf("Body = %q, want %q", apiErr.Body, `{"error":"invalid"}`)
+func TestClientDo_EnforcesBodyLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("too-large"))
+	}))
+	defer srv.Close()
+
+	c := New(nil, 4)
+	_, err := c.Do(context.Background(), &Request{Method: "GET", URL: srv.URL})
+	var tooLarge *BodyTooLargeError
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("expected BodyTooLargeError, got %v", err)
 	}
 }

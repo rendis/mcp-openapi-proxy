@@ -1,10 +1,12 @@
 package spec
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"sort"
@@ -14,75 +16,13 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// ResponseInfo describes a single HTTP response from the spec.
-type ResponseInfo struct {
-	StatusCode  string
-	Description string
-	ContentType string
-	Schema      map[string]any
-	Headers     []ResponseHeader
-}
+const (
+	methodHead    = "HEAD"
+	methodOptions = "OPTIONS"
+)
 
-// ResponseHeader describes a header returned in a response.
-type ResponseHeader struct {
-	Name        string
-	Description string
-	Required    bool
-	Type        string
-}
-
-// SecurityInfo describes a security scheme with its full details.
-type SecurityInfo struct {
-	Name   string
-	Type   string
-	In     string
-	Scheme string
-}
-
-// Endpoint represents a parsed API endpoint from the spec.
-type Endpoint struct {
-	Method       string       // GET, POST, PUT, PATCH, DELETE
-	Path         string       // /admin/features/{key}
-	OperationID  string       // operationId from spec (may be empty)
-	Summary      string       // short description
-	Description  string       // long description
-	Tags         []string     // grouping tags
-	PathParams   []Param      // path parameters
-	QueryParams  []Param      // query parameters
-	HeaderParams []Param      // header parameters
-	CookieParams []Param      // cookie parameters
-	RequestBody  *RequestBody // body schema (nil for GET/DELETE)
-	Security     []string     // security scheme names (backward compat)
-	Deprecated   bool         // whether the operation is deprecated
-	Responses    []ResponseInfo
-	SecurityInfo []SecurityInfo
-	ExternalDocs string // URL to external documentation
-}
-
-// Param describes an API parameter.
-type Param struct {
-	Name        string
-	Description string
-	Required    bool
-	Type        string // string, integer, number, boolean, array
-	Default     any
-	Enum        []any
-	Format      string
-	Minimum     *float64
-	Maximum     *float64
-	MinLength   *uint64
-	MaxLength   *uint64
-}
-
-// RequestBody describes the request body schema.
-type RequestBody struct {
-	Required    bool
-	ContentType string         // typically application/json
-	Schema      map[string]any // JSON Schema for the body
-}
-
-// LoadSpec loads an OpenAPI 3.x spec from a local file path or HTTP(S) URL.
-// It returns the parsed endpoints, the raw OpenAPI document, and any error.
+// LoadSpec loads, validates, and normalizes an OpenAPI 3.x spec from a local
+// file path or HTTP(S) URL.
 func LoadSpec(source string) ([]Endpoint, *openapi3.T, error) {
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
@@ -102,32 +42,66 @@ func LoadSpec(source string) ([]Endpoint, *openapi3.T, error) {
 	} else {
 		doc, err = loader.LoadFromFile(source)
 	}
-
 	if err != nil {
 		return nil, nil, fmt.Errorf("load spec from %s: %w", source, err)
 	}
 
-	endpoints := extractEndpoints(doc)
-	return endpoints, doc, nil
+	if err := doc.Validate(context.Background()); err != nil {
+		return nil, nil, fmt.Errorf("validate spec %s: %w", source, err)
+	}
+
+	return extractEndpoints(doc), doc, nil
 }
 
-// extractEndpoints walks doc.Paths and extracts all operations.
-func extractEndpoints(doc *openapi3.T) []Endpoint {
-	if doc.Paths == nil {
+// CollectOAuthScopes returns all scopes referenced by security requirements in
+// sorted order. It includes document-level and operation-level requirements.
+func CollectOAuthScopes(doc *openapi3.T) []string {
+	if doc == nil || doc.Paths == nil {
 		return nil
 	}
 
-	methods := []string{
-		http.MethodGet,
-		http.MethodPost,
-		http.MethodPut,
-		http.MethodPatch,
-		http.MethodDelete,
+	seen := map[string]bool{}
+	addScopes := func(reqs openapi3.SecurityRequirements) {
+		for _, req := range reqs {
+			for _, scopes := range req {
+				for _, scope := range scopes {
+					if scope != "" {
+						seen[scope] = true
+					}
+				}
+			}
+		}
 	}
 
-	var endpoints []Endpoint
+	addScopes(doc.Security)
 
-	// Iterate paths in sorted order for deterministic output.
+	for _, pathItem := range doc.Paths.Map() {
+		if pathItem == nil {
+			continue
+		}
+		for _, method := range supportedMethods() {
+			op := pathItem.GetOperation(method)
+			if op == nil || op.Security == nil {
+				continue
+			}
+			addScopes(*op.Security)
+		}
+	}
+
+	scopes := make([]string, 0, len(seen))
+	for scope := range seen {
+		scopes = append(scopes, scope)
+	}
+	sort.Strings(scopes)
+	return scopes
+}
+
+// extractEndpoints walks doc.Paths and extracts all supported operations.
+func extractEndpoints(doc *openapi3.T) []Endpoint {
+	if doc == nil || doc.Paths == nil {
+		return nil
+	}
+
 	pathMap := doc.Paths.Map()
 	paths := make([]string, 0, len(pathMap))
 	for p := range pathMap {
@@ -135,13 +109,14 @@ func extractEndpoints(doc *openapi3.T) []Endpoint {
 	}
 	sort.Strings(paths)
 
+	var endpoints []Endpoint
 	for _, path := range paths {
 		pathItem := pathMap[path]
 		if pathItem == nil {
 			continue
 		}
 
-		for _, method := range methods {
+		for _, method := range supportedMethods() {
 			op := pathItem.GetOperation(method)
 			if op == nil {
 				continue
@@ -154,35 +129,22 @@ func extractEndpoints(doc *openapi3.T) []Endpoint {
 				Summary:     op.Summary,
 				Description: op.Description,
 				Tags:        op.Tags,
+				Deprecated:  op.Deprecated,
 			}
 
-			// Collect parameters from both path-level and operation-level.
+			var opServers openapi3.Servers
+			if op.Servers != nil {
+				opServers = *op.Servers
+			}
+			ep.BaseURL, ep.Servers = resolveEndpointServers(doc.Servers, pathItem.Servers, opServers)
+
 			allParams := mergeParameters(pathItem.Parameters, op.Parameters)
 			for _, pRef := range allParams {
 				if pRef == nil || pRef.Value == nil {
 					continue
 				}
-				p := pRef.Value
-				param := Param{
-					Name:        p.Name,
-					Description: p.Description,
-					Required:    p.Required,
-					Type:        schemaType(p.Schema),
-					Default:     schemaDefault(p.Schema),
-				}
-				if p.Schema != nil && p.Schema.Value != nil {
-					s := p.Schema.Value
-					param.Enum = s.Enum
-					param.Format = s.Format
-					param.Minimum = s.Min
-					param.Maximum = s.Max
-					if s.MinLength != 0 {
-						ml := s.MinLength
-						param.MinLength = &ml
-					}
-					param.MaxLength = s.MaxLength
-				}
-				switch p.In {
+				param := convertParameter(pRef.Value, method, path)
+				switch pRef.Value.In {
 				case openapi3.ParameterInPath:
 					ep.PathParams = append(ep.PathParams, param)
 				case openapi3.ParameterInQuery:
@@ -190,40 +152,16 @@ func extractEndpoints(doc *openapi3.T) []Endpoint {
 				case openapi3.ParameterInHeader:
 					ep.HeaderParams = append(ep.HeaderParams, param)
 				case openapi3.ParameterInCookie:
-					log.Printf("warning: cookie parameter %q on %s %s — included but may need manual handling", p.Name, method, path)
+					log.Printf("warning: cookie parameter %q on %s %s requires explicit cookie handling", pRef.Value.Name, method, path)
 					ep.CookieParams = append(ep.CookieParams, param)
 				}
 			}
 
-			// Deprecated flag
-			ep.Deprecated = op.Deprecated
-
-			// Responses
+			ep.RequestBody = extractRequestBody(op.RequestBody)
 			ep.Responses = extractResponses(op)
-
-			// External docs
-			if op.ExternalDocs != nil && op.ExternalDocs.URL != "" {
-				ep.ExternalDocs = op.ExternalDocs.URL
-			}
-
-			// Request body
-			if op.RequestBody != nil && op.RequestBody.Value != nil {
-				rb := op.RequestBody.Value
-				ct, schema := extractBodySchema(rb)
-				if schema != nil {
-					ep.RequestBody = &RequestBody{
-						Required:    rb.Required,
-						ContentType: ct,
-						Schema:      schema,
-					}
-				}
-			}
-
-			// Security
-			ep.Security = extractSecurityNames(op.Security, doc.Security)
-
-			// SecurityInfo (full details)
-			ep.SecurityInfo = extractSecurityInfo(op.Security, doc.Security, doc)
+			ep.ExternalDocs = externalDocsURL(op.ExternalDocs)
+			ep.SecurityRequirements = extractSecurityRequirements(op.Security, doc.Security, doc)
+			ep.Security, ep.SecurityInfo = flattenSecurity(ep.SecurityRequirements)
 
 			endpoints = append(endpoints, ep)
 		}
@@ -232,17 +170,27 @@ func extractEndpoints(doc *openapi3.T) []Endpoint {
 	return endpoints
 }
 
+func supportedMethods() []string {
+	return []string{
+		http.MethodGet,
+		http.MethodPost,
+		http.MethodPut,
+		http.MethodPatch,
+		http.MethodDelete,
+		methodHead,
+		methodOptions,
+	}
+}
+
 // mergeParameters combines path-level and operation-level parameters.
 // Operation-level parameters override path-level ones with the same name+in.
 func mergeParameters(pathParams, opParams openapi3.Parameters) openapi3.Parameters {
 	seen := make(map[string]bool)
 	var result openapi3.Parameters
 
-	// Operation params take priority.
 	for _, p := range opParams {
 		if p != nil && p.Value != nil {
-			key := p.Value.In + ":" + p.Value.Name
-			seen[key] = true
+			seen[p.Value.In+":"+p.Value.Name] = true
 		}
 		result = append(result, p)
 	}
@@ -259,110 +207,98 @@ func mergeParameters(pathParams, opParams openapi3.Parameters) openapi3.Paramete
 	return result
 }
 
-// schemaType extracts the primary type string from a SchemaRef.
-func schemaType(ref *openapi3.SchemaRef) string {
-	if ref == nil || ref.Value == nil || ref.Value.Type == nil {
-		return "string"
+func convertParameter(p *openapi3.Parameter, method, path string) Param {
+	sm, _ := p.SerializationMethod()
+	style, explode := "", false
+	if sm != nil {
+		style = sm.Style
+		explode = sm.Explode
 	}
-	types := ref.Value.Type.Slice()
-	if len(types) == 0 {
-		return "string"
+
+	schemaMap := schemaRefToMap(p.Schema)
+	contentType := ""
+	if schemaMap == nil && len(p.Content) > 0 {
+		mt := firstMediaType(extractMediaTypes(p.Content))
+		if mt != nil {
+			schemaMap = cloneMap(mt.Schema)
+			contentType = mt.ContentType
+		}
 	}
-	return types[0]
+	schemaMap = mergeExamplesIntoSchema(schemaMap, p.Example, examplesToSlice(p.Examples))
+
+	param := Param{
+		Name:            p.Name,
+		Description:     p.Description,
+		Required:        p.Required,
+		Type:            schemaType(p.Schema, schemaMap),
+		Default:         schemaDefault(p.Schema),
+		Format:          schemaFormat(p.Schema, schemaMap),
+		Style:           style,
+		Explode:         explode,
+		AllowReserved:   p.AllowReserved,
+		AllowEmptyValue: p.AllowEmptyValue,
+		Deprecated:      p.Deprecated,
+		Schema:          schemaMap,
+		ContentType:     contentType,
+		Examples:        examplesFromSchemaOrParam(schemaMap, p.Example, p.Examples),
+	}
+
+	if p.Schema != nil && p.Schema.Value != nil {
+		s := p.Schema.Value
+		param.Enum = append([]any(nil), s.Enum...)
+		param.Minimum = s.Min
+		param.Maximum = s.Max
+		if s.MinLength != 0 {
+			ml := s.MinLength
+			param.MinLength = &ml
+		}
+		param.MaxLength = s.MaxLength
+	}
+
+	return param
 }
 
-// schemaDefault extracts the default value from a SchemaRef.
-func schemaDefault(ref *openapi3.SchemaRef) any {
+func extractRequestBody(ref *openapi3.RequestBodyRef) *RequestBody {
 	if ref == nil || ref.Value == nil {
 		return nil
 	}
-	return ref.Value.Default
+	body := &RequestBody{
+		Required: ref.Value.Required,
+		Content:  extractMediaTypes(ref.Value.Content),
+	}
+	if len(body.Content) == 0 {
+		return nil
+	}
+	return body
 }
 
-// extractBodySchema extracts the JSON schema from the request body content.
-// It returns the content type and a plain map[string]any schema.
+// extractBodySchema returns the preferred request body content type and schema.
+// It is kept as a compatibility helper for tests.
 func extractBodySchema(rb *openapi3.RequestBody) (string, map[string]any) {
-	if rb.Content == nil {
+	if rb == nil || rb.Content == nil {
 		return "", nil
 	}
-
-	// Prefer application/json.
 	for _, ct := range []string{"application/json", "application/merge-patch+json"} {
-		mt := rb.Content[ct]
-		if mt != nil && mt.Schema != nil {
-			schema := schemaRefToMap(mt.Schema)
-			return ct, schema
+		if mt := rb.Content[ct]; mt != nil && mt.Schema != nil {
+			return ct, schemaRefToMap(mt.Schema)
 		}
 	}
-
-	// Fallback: first available content type that is NOT multipart or form-urlencoded.
 	for ct, mt := range rb.Content {
-		if strings.HasPrefix(ct, "multipart/") {
-			continue
-		}
-		if strings.HasPrefix(ct, "application/x-www-form") {
+		if strings.HasPrefix(ct, "multipart/") || strings.HasPrefix(ct, "application/x-www-form") {
 			continue
 		}
 		if mt != nil && mt.Schema != nil {
-			schema := schemaRefToMap(mt.Schema)
-			return ct, schema
+			return ct, schemaRefToMap(mt.Schema)
 		}
 	}
-
 	return "", nil
 }
 
-// schemaRefToMap converts an openapi3.SchemaRef to a plain map[string]any
-// by marshaling to JSON and back.
-func schemaRefToMap(ref *openapi3.SchemaRef) map[string]any {
-	if ref == nil || ref.Value == nil {
-		return nil
-	}
-
-	data, err := json.Marshal(ref.Value)
-	if err != nil {
-		return nil
-	}
-
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil
-	}
-
-	// Remove internal fields that are not part of JSON Schema.
-	delete(m, "__origin__")
-
-	return m
-}
-
-// extractSecurityNames collects security scheme names from an operation's
-// security requirements, falling back to the document-level security.
-func extractSecurityNames(opSecurity *openapi3.SecurityRequirements, docSecurity openapi3.SecurityRequirements) []string {
-	reqs := docSecurity
-	if opSecurity != nil {
-		reqs = *opSecurity
-	}
-
-	var names []string
-	seen := make(map[string]bool)
-	for _, req := range reqs {
-		for name := range req {
-			if !seen[name] {
-				seen[name] = true
-				names = append(names, name)
-			}
-		}
-	}
-	return names
-}
-
-// extractResponses builds ResponseInfo slices from an operation's Responses.
 func extractResponses(op *openapi3.Operation) []ResponseInfo {
-	if op.Responses == nil {
+	if op == nil || op.Responses == nil {
 		return nil
 	}
 
-	// Collect status codes in sorted order for deterministic output.
 	respMap := op.Responses.Map()
 	codes := make([]string, 0, len(respMap))
 	for code := range respMap {
@@ -370,111 +306,496 @@ func extractResponses(op *openapi3.Operation) []ResponseInfo {
 	}
 	sort.Strings(codes)
 
-	var results []ResponseInfo
+	var responses []ResponseInfo
 	for _, code := range codes {
-		respRef := respMap[code]
-		if respRef == nil || respRef.Value == nil {
+		ref := respMap[code]
+		if ref == nil || ref.Value == nil {
 			continue
 		}
-		resp := respRef.Value
-
-		desc := ""
-		if resp.Description != nil {
-			desc = *resp.Description
-		}
+		resp := ref.Value
 		ri := ResponseInfo{
 			StatusCode:  code,
-			Description: desc,
+			Description: derefString(resp.Description),
+			Content:     extractMediaTypes(resp.Content),
 		}
-
-		// Extract response headers.
-		for hdrName, hdrRef := range resp.Headers {
-			if hdrRef == nil || hdrRef.Value == nil {
+		for headerName, headerRef := range resp.Headers {
+			if headerRef == nil || headerRef.Value == nil {
 				continue
 			}
-			hdr := hdrRef.Value
-			rh := ResponseHeader{
-				Name:        hdrName,
-				Description: hdr.Description,
-				Required:    hdr.Required,
-				Type:        schemaType(hdr.Schema),
-			}
-			ri.Headers = append(ri.Headers, rh)
+			ri.Headers = append(ri.Headers, ResponseHeader{
+				Name:        headerName,
+				Description: headerRef.Value.Description,
+				Required:    headerRef.Value.Required,
+				Schema:      schemaRefToMap(headerRef.Value.Schema),
+			})
 		}
-		// Sort headers for deterministic output.
 		sort.Slice(ri.Headers, func(i, j int) bool {
 			return ri.Headers[i].Name < ri.Headers[j].Name
 		})
+		responses = append(responses, ri)
+	}
 
-		// Extract schema from content (prefer application/json).
-		if resp.Content != nil {
-			for _, ct := range []string{"application/json", "application/merge-patch+json"} {
-				mt := resp.Content[ct]
-				if mt != nil && mt.Schema != nil {
-					ri.ContentType = ct
-					ri.Schema = schemaRefToMap(mt.Schema)
-					break
-				}
+	return responses
+}
+
+func extractMediaTypes(content openapi3.Content) []MediaType {
+	if len(content) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(content))
+	for ct := range content {
+		keys = append(keys, ct)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return mediaTypeRank(keys[i]) < mediaTypeRank(keys[j]) ||
+			(mediaTypeRank(keys[i]) == mediaTypeRank(keys[j]) && keys[i] < keys[j])
+	})
+
+	mediaTypes := make([]MediaType, 0, len(keys))
+	for _, ct := range keys {
+		mt := content[ct]
+		if mt == nil {
+			continue
+		}
+
+		encodings := make(map[string]Encoding, len(mt.Encoding))
+		for name, enc := range mt.Encoding {
+			if enc == nil {
+				continue
 			}
-			// Fallback: first available content type.
-			if ri.ContentType == "" {
-				for ct, mt := range resp.Content {
-					if mt != nil && mt.Schema != nil {
-						ri.ContentType = ct
-						ri.Schema = schemaRefToMap(mt.Schema)
-						break
-					}
-				}
+			sm := enc.SerializationMethod()
+			if sm == nil {
+				continue
+			}
+			encodings[name] = Encoding{
+				ContentType:   enc.ContentType,
+				Style:         sm.Style,
+				Explode:       sm.Explode,
+				AllowReserved: enc.AllowReserved,
 			}
 		}
 
-		results = append(results, ri)
+		mediaTypes = append(mediaTypes, MediaType{
+			ContentType: ct,
+			Schema:      mergeExamplesIntoSchema(schemaRefToMap(mt.Schema), mt.Example, examplesToSlice(mt.Examples)),
+			Examples:    examplesToSlice(mt.Examples),
+			Encoding:    encodings,
+		})
 	}
-	return results
+
+	return mediaTypes
 }
 
-// extractSecurityInfo collects full security scheme details from an operation,
-// falling back to the document-level security.
-func extractSecurityInfo(opSecurity *openapi3.SecurityRequirements, docSecurity openapi3.SecurityRequirements, doc *openapi3.T) []SecurityInfo {
+func resolveEndpointServers(docServers, pathServers, opServers openapi3.Servers) (string, []ServerInfo) {
+	servers := docServers
+	switch {
+	case len(opServers) > 0:
+		servers = opServers
+	case len(pathServers) > 0:
+		servers = pathServers
+	}
+
+	infos := resolveServerInfos(servers)
+	if len(infos) == 1 && isUsableServerURL(infos[0].URL) {
+		return infos[0].URL, infos
+	}
+	return "", infos
+}
+
+func resolveServerInfos(servers openapi3.Servers) []ServerInfo {
+	if len(servers) == 0 {
+		return nil
+	}
+
+	seen := map[string]bool{}
+	infos := make([]ServerInfo, 0, len(servers))
+	for _, srv := range servers {
+		if srv == nil {
+			continue
+		}
+		resolved := resolveServerURL(srv)
+		if resolved == "" || seen[resolved] {
+			continue
+		}
+		seen[resolved] = true
+		infos = append(infos, ServerInfo{
+			URL:         resolved,
+			Description: srv.Description,
+		})
+	}
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].URL < infos[j].URL
+	})
+	return infos
+}
+
+func resolveServerURL(server *openapi3.Server) string {
+	if server == nil || server.URL == "" {
+		return ""
+	}
+	resolved := server.URL
+	for name, variable := range server.Variables {
+		if variable == nil || variable.Default == "" {
+			return ""
+		}
+		resolved = strings.ReplaceAll(resolved, "{"+name+"}", variable.Default)
+	}
+	return resolved
+}
+
+func isUsableServerURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return u.IsAbs() && (u.Scheme == "http" || u.Scheme == "https")
+}
+
+func extractSecurityRequirements(opSecurity *openapi3.SecurityRequirements, docSecurity openapi3.SecurityRequirements, doc *openapi3.T) []SecurityRequirement {
 	reqs := docSecurity
 	if opSecurity != nil {
 		reqs = *opSecurity
 	}
+	if len(reqs) == 0 {
+		return nil
+	}
 
-	var infos []SecurityInfo
-	seen := make(map[string]bool)
+	out := make([]SecurityRequirement, 0, len(reqs))
 	for _, req := range reqs {
+		if len(req) == 0 {
+			out = append(out, SecurityRequirement{})
+			continue
+		}
+		names := make([]string, 0, len(req))
 		for name := range req {
-			if seen[name] {
-				continue
-			}
-			seen[name] = true
+			names = append(names, name)
+		}
+		sort.Strings(names)
 
-			si := SecurityInfo{Name: name}
-
-			// Look up scheme details from components.
-			if doc.Components != nil && doc.Components.SecuritySchemes != nil {
-				if schemeRef, ok := doc.Components.SecuritySchemes[name]; ok && schemeRef != nil && schemeRef.Value != nil {
-					scheme := schemeRef.Value
-					si.Type = scheme.Type
-					si.In = scheme.In
-					si.Scheme = scheme.Scheme
+		sr := SecurityRequirement{}
+		for _, name := range names {
+			info := SecurityInfo{Name: name, Scopes: append([]string(nil), req[name]...)}
+			if doc != nil && doc.Components != nil && doc.Components.SecuritySchemes != nil {
+				if ref, ok := doc.Components.SecuritySchemes[name]; ok && ref != nil && ref.Value != nil {
+					scheme := ref.Value
+					info.Type = scheme.Type
+					info.In = scheme.In
+					info.ParameterName = scheme.Name
+					info.Scheme = scheme.Scheme
+					info.BearerFormat = scheme.BearerFormat
+					info.Description = scheme.Description
+					info.OpenIDConnectURL = scheme.OpenIdConnectUrl
 				}
 			}
-
-			infos = append(infos, si)
+			sr.Schemes = append(sr.Schemes, info)
 		}
+		out = append(out, sr)
 	}
-	return infos
+
+	return out
 }
 
-// isHTTP returns true if the source starts with http:// or https://.
+func flattenSecurity(requirements []SecurityRequirement) ([]string, []SecurityInfo) {
+	if len(requirements) == 0 {
+		return nil, nil
+	}
+
+	seen := map[string]bool{}
+	var names []string
+	var infos []SecurityInfo
+	for _, req := range requirements {
+		for _, scheme := range req.Schemes {
+			if seen[scheme.Name] {
+				continue
+			}
+			seen[scheme.Name] = true
+			names = append(names, scheme.Name)
+			infos = append(infos, scheme)
+		}
+	}
+	return names, infos
+}
+
+// extractSecurityNames is kept as a compatibility helper for tests.
+func extractSecurityNames(opSecurity *openapi3.SecurityRequirements, docSecurity openapi3.SecurityRequirements) []string {
+	names, _ := flattenSecurity(extractSecurityRequirements(opSecurity, docSecurity, nil))
+	return names
+}
+
+func schemaRefToMap(ref *openapi3.SchemaRef) map[string]any {
+	if ref == nil || ref.Value == nil {
+		return nil
+	}
+	data, err := json.Marshal(ref.Value)
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	return normalizeSchemaMap(m)
+}
+
+func normalizeSchemaMap(schema map[string]any) map[string]any {
+	if schema == nil {
+		return nil
+	}
+	normalized, ok := normalizeValue(schema).(map[string]any)
+	if !ok {
+		return nil
+	}
+	return normalized
+}
+
+func normalizeValue(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		m := make(map[string]any, len(x))
+		for k, vv := range x {
+			if k == "__origin__" {
+				continue
+			}
+			m[k] = normalizeValue(vv)
+		}
+
+		if example, ok := m["example"]; ok {
+			if _, exists := m["examples"]; !exists {
+				m["examples"] = []any{normalizeValue(example)}
+			}
+			delete(m, "example")
+		}
+
+		if nullable, ok := m["nullable"].(bool); ok && nullable {
+			delete(m, "nullable")
+			switch t := m["type"].(type) {
+			case string:
+				m["type"] = []any{t, "null"}
+			case []any:
+				if !containsAny(t, "null") {
+					m["type"] = append(t, "null")
+				}
+			case []string:
+				if !containsString(t, "null") {
+					next := append(append([]string(nil), t...), "null")
+					m["type"] = next
+				}
+			default:
+				m = map[string]any{
+					"anyOf": []any{m, map[string]any{"type": "null"}},
+				}
+			}
+		}
+
+		return m
+	case []any:
+		out := make([]any, 0, len(x))
+		for _, item := range x {
+			out = append(out, normalizeValue(item))
+		}
+		return out
+	case []string:
+		out := make([]any, 0, len(x))
+		for _, item := range x {
+			out = append(out, item)
+		}
+		return out
+	default:
+		return x
+	}
+}
+
+func mergeExamplesIntoSchema(schema map[string]any, example any, examples []any) map[string]any {
+	if schema == nil {
+		return nil
+	}
+	schema = cloneMap(schema)
+	if len(examples) > 0 {
+		schema["examples"] = examples
+		return schema
+	}
+	if example != nil {
+		schema["examples"] = []any{normalizeValue(example)}
+	}
+	return schema
+}
+
+func examplesFromSchemaOrParam(schema map[string]any, example any, examples openapi3.Examples) []any {
+	if v, ok := schema["examples"].([]any); ok && len(v) > 0 {
+		return append([]any(nil), v...)
+	}
+	return examplesToSlice(examplesWithInline(example, examples))
+}
+
+func examplesWithInline(example any, examples openapi3.Examples) openapi3.Examples {
+	if example == nil {
+		return examples
+	}
+	out := openapi3.Examples{}
+	for name, ref := range examples {
+		out[name] = ref
+	}
+	out["default"] = &openapi3.ExampleRef{Value: &openapi3.Example{Value: example}}
+	return out
+}
+
+func examplesToSlice(examples openapi3.Examples) []any {
+	if len(examples) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(examples))
+	for name := range examples {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := make([]any, 0, len(names))
+	for _, name := range names {
+		ref := examples[name]
+		if ref == nil || ref.Value == nil {
+			continue
+		}
+		out = append(out, normalizeValue(ref.Value.Value))
+	}
+	return out
+}
+
+func externalDocsURL(docs *openapi3.ExternalDocs) string {
+	if docs == nil {
+		return ""
+	}
+	return docs.URL
+}
+
+func schemaType(ref *openapi3.SchemaRef, schema map[string]any) string {
+	if ref != nil && ref.Value != nil && ref.Value.Type != nil {
+		if types := ref.Value.Type.Slice(); len(types) > 0 {
+			return types[0]
+		}
+	}
+	switch t := schema["type"].(type) {
+	case string:
+		return t
+	case []any:
+		for _, item := range t {
+			if s, ok := item.(string); ok && s != "null" {
+				return s
+			}
+		}
+	}
+	return "string"
+}
+
+func schemaFormat(ref *openapi3.SchemaRef, schema map[string]any) string {
+	if ref != nil && ref.Value != nil {
+		return ref.Value.Format
+	}
+	if format, ok := schema["format"].(string); ok {
+		return format
+	}
+	return ""
+}
+
+func schemaDefault(ref *openapi3.SchemaRef) any {
+	if ref == nil || ref.Value == nil {
+		return nil
+	}
+	return ref.Value.Default
+}
+
+func mediaTypeRank(contentType string) int {
+	base, _, _ := mime.ParseMediaType(contentType)
+	switch {
+	case base == "application/json":
+		return 0
+	case strings.HasSuffix(base, "+json"):
+		return 1
+	case strings.HasPrefix(base, "text/"):
+		return 2
+	case isBinaryContentType(base):
+		return 3
+	default:
+		return 4
+	}
+}
+
+func isBinaryContentType(contentType string) bool {
+	base, _, _ := mime.ParseMediaType(contentType)
+	switch {
+	case base == "application/octet-stream":
+		return true
+	case strings.HasPrefix(base, "image/"):
+		return true
+	case strings.HasPrefix(base, "audio/"):
+		return true
+	case strings.HasPrefix(base, "video/"):
+		return true
+	case base == "application/pdf":
+		return true
+	case base == "application/zip":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstMediaType(mediaTypes []MediaType) *MediaType {
+	if len(mediaTypes) == 0 {
+		return nil
+	}
+	return &mediaTypes[0]
+}
+
+func cloneMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		out := make(map[string]any, len(m))
+		for k, v := range m {
+			out[k] = v
+		}
+		return out
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func containsAny(items []any, want string) bool {
+	for _, item := range items {
+		if s, ok := item.(string); ok && s == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func isHTTP(source string) bool {
 	return strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://")
 }
 
-// httpReadFromURI fetches a spec from an HTTP(S) URL.
-func httpReadFromURI(loader *openapi3.Loader, location *url.URL) ([]byte, error) {
+func httpReadFromURI(_ *openapi3.Loader, location *url.URL) ([]byte, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(location.String())
 	if err != nil {

@@ -50,9 +50,13 @@ func WithHeaderParam(name, typ string, required bool) EndpointOpt {
 func WithBody(required bool, schema map[string]any) EndpointOpt {
 	return func(ep *spec.Endpoint) {
 		ep.RequestBody = &spec.RequestBody{
-			Required:    required,
-			ContentType: "application/json",
-			Schema:      schema,
+			Required: required,
+			Content: []spec.MediaType{
+				{
+					ContentType: "application/json",
+					Schema:      schema,
+				},
+			},
 		}
 	}
 }
@@ -61,9 +65,13 @@ func WithBody(required bool, schema map[string]any) EndpointOpt {
 func WithBodyContentType(required bool, contentType string, schema map[string]any) EndpointOpt {
 	return func(ep *spec.Endpoint) {
 		ep.RequestBody = &spec.RequestBody{
-			Required:    required,
-			ContentType: contentType,
-			Schema:      schema,
+			Required: required,
+			Content: []spec.MediaType{
+				{
+					ContentType: contentType,
+					Schema:      schema,
+				},
+			},
 		}
 	}
 }
