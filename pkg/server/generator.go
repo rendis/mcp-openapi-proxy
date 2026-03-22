@@ -162,12 +162,24 @@ func paramToSchema(p spec.Param) *jsonschema.Schema {
 	s := &jsonschema.Schema{
 		Type:        mapParamType(p.Type),
 		Description: p.Description,
+		Format:      p.Format,
+		Enum:        p.Enum,
+		Minimum:     p.Minimum,
+		Maximum:     p.Maximum,
 	}
 	if p.Default != nil {
 		data, err := json.Marshal(p.Default)
 		if err == nil {
 			s.Default = data
 		}
+	}
+	if p.MinLength != nil {
+		v := int(*p.MinLength)
+		s.MinLength = &v
+	}
+	if p.MaxLength != nil {
+		v := int(*p.MaxLength)
+		s.MaxLength = &v
 	}
 	return s
 }

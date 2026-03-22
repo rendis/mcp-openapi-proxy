@@ -233,6 +233,67 @@ func TestBuildInputSchema(t *testing.T) {
 			t.Errorf("default = %v, want 20", val)
 		}
 	})
+
+	t.Run("enum values propagated", func(t *testing.T) {
+		ep := testutil.MakeEndpoint("GET", "/search")
+		ep.QueryParams = []spec.Param{
+			{Name: "status", Type: "string", Enum: []any{"active", "inactive", "archived"}},
+		}
+		schema := buildInputSchema(ep)
+		prop := schema.Properties["status"]
+		if len(prop.Enum) != 3 {
+			t.Fatalf("enum length = %d, want 3", len(prop.Enum))
+		}
+		if prop.Enum[0] != "active" || prop.Enum[1] != "inactive" || prop.Enum[2] != "archived" {
+			t.Errorf("enum = %v, want [active inactive archived]", prop.Enum)
+		}
+	})
+
+	t.Run("format propagated", func(t *testing.T) {
+		ep := testutil.MakeEndpoint("GET", "/search")
+		ep.QueryParams = []spec.Param{
+			{Name: "email", Type: "string", Format: "email"},
+		}
+		schema := buildInputSchema(ep)
+		prop := schema.Properties["email"]
+		if prop.Format != "email" {
+			t.Errorf("format = %q, want email", prop.Format)
+		}
+	})
+
+	t.Run("numeric bounds propagated", func(t *testing.T) {
+		min := 0.0
+		max := 100.0
+		ep := testutil.MakeEndpoint("GET", "/search")
+		ep.QueryParams = []spec.Param{
+			{Name: "score", Type: "number", Minimum: &min, Maximum: &max},
+		}
+		schema := buildInputSchema(ep)
+		prop := schema.Properties["score"]
+		if prop.Minimum == nil || *prop.Minimum != 0 {
+			t.Errorf("minimum = %v, want 0", prop.Minimum)
+		}
+		if prop.Maximum == nil || *prop.Maximum != 100 {
+			t.Errorf("maximum = %v, want 100", prop.Maximum)
+		}
+	})
+
+	t.Run("string length bounds propagated", func(t *testing.T) {
+		minLen := uint64(1)
+		maxLen := uint64(255)
+		ep := testutil.MakeEndpoint("GET", "/search")
+		ep.QueryParams = []spec.Param{
+			{Name: "name", Type: "string", MinLength: &minLen, MaxLength: &maxLen},
+		}
+		schema := buildInputSchema(ep)
+		prop := schema.Properties["name"]
+		if prop.MinLength == nil || *prop.MinLength != 1 {
+			t.Errorf("minLength = %v, want 1", prop.MinLength)
+		}
+		if prop.MaxLength == nil || *prop.MaxLength != 255 {
+			t.Errorf("maxLength = %v, want 255", prop.MaxLength)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
