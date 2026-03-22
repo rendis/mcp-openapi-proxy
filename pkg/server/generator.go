@@ -27,8 +27,12 @@ func isReservedHeader(name string) bool {
 }
 
 // GenerateTools creates MCP tools from parsed endpoints and registers them on the server.
+// Deprecated endpoints are skipped — they should not be exposed to agents.
 func GenerateTools(srv *mcp.Server, endpoints []spec.Endpoint, c *client.Client, prefix string) {
 	for _, ep := range endpoints {
+		if ep.Deprecated {
+			continue
+		}
 		ep := ep // capture loop variable
 		tool := buildTool(ep, prefix)
 		handler := buildHandler(ep, c)
@@ -52,15 +56,10 @@ func buildTool(ep spec.Endpoint, prefix string) *mcp.Tool {
 	}
 }
 
-// buildDescription creates a rich description including deprecated flag,
-// response codes, auth info, and external docs.
+// buildDescription creates a rich description including response codes,
+// auth info, and external docs.
 func buildDescription(ep spec.Endpoint) string {
 	var parts []string
-
-	// Deprecated flag
-	if ep.Deprecated {
-		parts = append(parts, "[DEPRECATED]")
-	}
 
 	// Method and path
 	methodPath := fmt.Sprintf("%s %s", ep.Method, ep.Path)

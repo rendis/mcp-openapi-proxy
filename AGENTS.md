@@ -36,7 +36,8 @@ Go CLI that converts OpenAPI 3.x specs into MCP stdio servers dynamically — on
 - Request body nested under `"body"` key in tool input schema
 - GET tools → readOnly annotation, DELETE tools → destructive annotation
 - Tool OutputSchema derived from first 2xx response with JSON schema (must be type "object" per MCP spec)
-- Tool description enriched with [DEPRECATED] flag, response codes, auth scheme details, external docs URL
+- Deprecated endpoints are skipped — not registered as tools
+- Tool description enriched with response codes, auth scheme details, external docs URL
 - Handler response wrapped in envelope: `{status, content_type, headers, body}`
 - `client.Do()` returns `*client.Response` with StatusCode, Headers, ContentType, Body
 - stdio transport only

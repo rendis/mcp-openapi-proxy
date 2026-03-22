@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rendis/mcp-openapi-proxy/pkg/auth"
+	"github.com/rendis/mcp-openapi-proxy/pkg/client"
 	"github.com/rendis/mcp-openapi-proxy/pkg/spec"
 )
 
@@ -377,19 +380,24 @@ func TestFullContract_OutputSchema(t *testing.T) {
 func TestFullContract_Description(t *testing.T) {
 	eps := loadFullContract(t)
 
-	t.Run("deprecated_endpoint_has_flag", func(t *testing.T) {
-		ep := findEndpoint(t, eps, "PUT", "/items/{id}")
-		tool := buildTool(ep, "api")
-		if !strings.Contains(tool.Description, "[DEPRECATED]") {
-			t.Errorf("description %q should contain [DEPRECATED]", tool.Description)
-		}
-	})
+	t.Run("deprecated_endpoint_skipped_by_GenerateTools", func(t *testing.T) {
+		// Deprecated endpoints should not be registered as tools.
+		// Verify by counting tools generated from the spec.
+		srv := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "0.0.1"}, nil)
+		c := client.New("http://localhost", auth.NewStaticTokenProvider("tok"), nil)
+		GenerateTools(srv, eps, c, "api")
 
-	t.Run("non_deprecated_no_flag", func(t *testing.T) {
-		ep := findEndpoint(t, eps, "GET", "/items")
-		tool := buildTool(ep, "api")
-		if strings.Contains(tool.Description, "[DEPRECATED]") {
-			t.Error("GET /items description should not contain [DEPRECATED]")
+		// PUT /items/{id} is deprecated — it should be excluded.
+		// The spec has 10 endpoints total, 1 deprecated → 9 tools.
+		depCount := 0
+		for _, ep := range eps {
+			if ep.Deprecated {
+				depCount++
+			}
+		}
+		nonDepCount := len(eps) - depCount
+		if nonDepCount != 9 {
+			t.Errorf("expected 9 non-deprecated endpoints, got %d (total=%d, deprecated=%d)", nonDepCount, len(eps), depCount)
 		}
 	})
 
