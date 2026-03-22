@@ -9,6 +9,8 @@ Turns any OpenAPI 3.x spec into a fully functional MCP stdio server. One tool pe
 
 For exhaustive reference, see the repository `README.md`. This skill is the short operational guide for installing the binary, wiring it into an MCP client, and using the current tool contract correctly.
 
+Always discover the actual registered tools first; never assume semantic tool names.
+
 ## Install
 
 ```bash
@@ -159,6 +161,20 @@ Pattern: `{prefix}_{method}_{sanitized_path}` — lowercase, special chars → `
 | POST | `/users/{id}/roles` | `api` | `api_post_users_id_roles` |
 | DELETE | `/admin/features/{key}` | `fe` | `fe_delete_admin_features_key` |
 
+Discover tools from the running MCP server and call the exact names it exposes. Do not invent aliases from summaries, operation IDs, or verbs like `list`, `create`, or `toggle`.
+
+**Feature Flags API example** with `MCP_TOOL_PREFIX=fe`:
+
+| Operation | Real Tool Name |
+|---|---|
+| `GET /admin/features` | `fe_get_admin_features` |
+| `POST /admin/features` | `fe_post_admin_features` |
+| `GET /admin/features/{key}` | `fe_get_admin_features_key` |
+| `PATCH /admin/features/{key}/toggle` | `fe_patch_admin_features_key_toggle` |
+| `GET /admin/workspaces` | `fe_get_admin_workspaces` |
+
+There is no semantic alias layer in the product. Do not invent alternate names from verbs like `list`, `create`, `get`, `toggle`, or resource labels; only the generated runtime names are valid.
+
 ## Input and Output Contract
 
 Each tool input is grouped by HTTP location:
@@ -184,6 +200,9 @@ Example:
   },
   "query": {
     "include_roles": true
+  },
+  "headers": {
+    "X-Workspace": "acme"
   },
   "body": {
     "name": "Jane Doe"
@@ -224,6 +243,8 @@ Every tool returns the same envelope in MCP `StructuredContent` and pretty JSON 
 - Binary payloads are represented as base64 wrappers
 - Deprecated endpoints are registered by default and only excluded with `MCP_EXCLUDE_DEPRECATED=1`
 
+`X-Workspace` is sent in `headers` per request or configured globally with `MCP_EXTRA_HEADERS`. Workspace selection is header-based, not a dedicated tool.
+
 ## Multiple APIs
 
 Use distinct prefixes to run side-by-side:
@@ -246,5 +267,6 @@ Use distinct prefixes to run side-by-side:
 - **Spec URL unreachable** → fails at startup; check network/VPN
 - **Authenticated calls to non-loopback `http://`** → blocked unless `MCP_ALLOW_INSECURE_HTTP=1`
 - **Using the old flat input contract** → current tools expect `path/query/headers/cookies/body`, not top-level params
+- **Assuming semantic tool names** → always inspect the registered tools first and call the exact generated name
 
 For exhaustive reference, examples, and troubleshooting, see the repository `README.md`.

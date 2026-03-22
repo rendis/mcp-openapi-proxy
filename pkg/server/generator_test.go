@@ -19,6 +19,11 @@ func TestToolName(t *testing.T) {
 		{name: "dots", prefix: "svc", method: "GET", path: "/v1/health.check", want: "svc_get_v1_health_check"},
 		{name: "trailing slash", prefix: "api", method: "GET", path: "/users/", want: "api_get_users"},
 		{name: "empty path", prefix: "api", method: "GET", path: "", want: "api_get"},
+		{name: "feature flags list", prefix: "fe", method: "GET", path: "/admin/features", want: "fe_get_admin_features"},
+		{name: "feature flags create", prefix: "fe", method: "POST", path: "/admin/features", want: "fe_post_admin_features"},
+		{name: "feature flag by key", prefix: "fe", method: "GET", path: "/admin/features/{key}", want: "fe_get_admin_features_key"},
+		{name: "feature flag toggle", prefix: "fe", method: "PATCH", path: "/admin/features/{key}/toggle", want: "fe_patch_admin_features_key_toggle"},
+		{name: "workspaces list", prefix: "fe", method: "GET", path: "/admin/workspaces", want: "fe_get_admin_workspaces"},
 	}
 
 	for _, tt := range tests {

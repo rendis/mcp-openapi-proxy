@@ -214,6 +214,26 @@ Path segments are lowercased. Special characters (`/`, `-`, `{`, `}`, `.`) are r
 | DELETE | `/admin/features/{key}` | `fe` | `fe_delete_admin_features_key` |
 | GET | `/v1/health.check` | `svc` | `svc_get_v1_health_check` |
 
+### Tool Discovery
+
+Agents and client integrations should always discover the actual registered tools first and then call the exact tool names returned by the MCP server.
+
+- List available tools before invoking them
+- Use the exact runtime-generated tool name
+- Do not infer names from `operationId`, summaries, or semantic verbs like `list`, `create`, or `toggle`
+
+**Feature Flags API example** with `MCP_TOOL_PREFIX=fe`:
+
+| Operation | Real Tool Name |
+|---|---|
+| `GET /admin/features` | `fe_get_admin_features` |
+| `POST /admin/features` | `fe_post_admin_features` |
+| `GET /admin/features/{key}` | `fe_get_admin_features_key` |
+| `PATCH /admin/features/{key}/toggle` | `fe_patch_admin_features_key_toggle` |
+| `GET /admin/workspaces` | `fe_get_admin_workspaces` |
+
+There is no semantic alias layer in the product. Do not invent alternate names based on verbs like `list`, `create`, `get`, or `toggle`; only the generated runtime names are part of the contract.
+
 ### Input Schema
 
 Each tool receives an object grouped by HTTP location:
@@ -240,11 +260,16 @@ Only the sections used by the operation are present, and every section has `addi
   "query": {
     "include_roles": true
   },
+  "headers": {
+    "X-Workspace": "acme"
+  },
   "body": {
     "name": "Jane Doe"
   }
 }
 ```
+
+Workspace context is passed as a header per request, for example `headers: {"X-Workspace": "acme"}`, or globally through `MCP_EXTRA_HEADERS`. There is no separate `set_workspace` tool.
 
 If a request body supports multiple media types, the `body` section becomes:
 
