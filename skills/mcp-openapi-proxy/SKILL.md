@@ -92,23 +92,32 @@ Set `MCP_AUTH_TOKEN`. Sent as `Authorization: Bearer <token>` on every request.
 
 ### OIDC PKCE (production)
 
-**Login** — opens browser for Authorization Code + PKCE:
+Two discovery modes:
+
+**Standard OIDC (recommended)** — fetches `{issuer}/.well-known/openid-configuration`:
 
 ```bash
-# Standard OIDC discovery (recommended — any OIDC provider)
 MCP_OIDC_ISSUER=https://auth.example.com/realms/myrealm \
 MCP_OIDC_CLIENT_ID=my-client \
 mcp-openapi-proxy login
+```
 
-# Application-specific discovery (requires API to expose /api/v1/auth/config)
+**Application-specific** — fetches `{baseURL}/api/v1/auth/config` (proprietary, not standard OIDC):
+
+```bash
 MCP_BASE_URL=https://api.example.com mcp-openapi-proxy login
 ```
 
-**Status:** `mcp-openapi-proxy status`
+**Commands:** `mcp-openapi-proxy status` | `mcp-openapi-proxy logout`
 
-**Logout:** `mcp-openapi-proxy logout`
+**Scopes:** `openid profile email offline_access` (default). `offline_access` always enforced for refresh tokens.
 
-Tokens stored at `~/.mcp-openapi-proxy/mcp-openapi-proxy-tokens.json` (0600, atomic writes). Auto-refreshes when within 30s of expiry. If refresh fails but token hasn't expired, the existing token is used as fallback.
+**Token lifecycle:**
+- Stored at `~/.mcp-openapi-proxy/mcp-openapi-proxy-tokens.json` (0600, atomic writes)
+- Auto-refreshes 30s before expiry (15s timeout, detached context)
+- Refresh failure with valid token → uses existing token as fallback
+- Missing `expires_in` in refresh response → defaults to 1 hour
+- Login timeout: 5 minutes
 
 ## Tool Naming
 

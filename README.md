@@ -240,7 +240,7 @@ MCP_AUTH_TOKEN=dev-token mcp-openapi-proxy
 
 ### OIDC PKCE (Production)
 
-For production APIs protected by any OIDC provider (Keycloak, Auth0, Okta, Google, etc.), use the built-in browser-based login flow. Endpoints are discovered automatically via `.well-known/openid-configuration`.
+For production APIs protected by an OIDC provider, the proxy includes a browser-based login flow using [Authorization Code + PKCE](https://oauth.net/2/pkce/) — the most secure OAuth 2.0 flow for public clients. No client secret is needed; authentication relies on a cryptographic code verifier that proves the login was initiated by the same process.
 
 ```mermaid
 sequenceDiagram
@@ -250,47 +250,115 @@ sequenceDiagram
     participant IdP as OIDC Provider
 
     U->>P: mcp-openapi-proxy login
-    P->>P: Generate PKCE verifier + challenge
-    P->>P: Start localhost callback server
+    P->>P: Generate PKCE verifier + challenge (SHA256)
+    P->>P: Start localhost callback server (127.0.0.1:random-port)
     P->>B: Open authorization URL
     B->>IdP: Authorization request + PKCE challenge
     IdP->>B: User authenticates
     B->>P: Redirect with authorization code
     P->>IdP: Exchange code + verifier for tokens
     IdP->>P: Access token + refresh token
-    P->>P: Save to ~/.mcp-openapi-proxy/
+    P->>P: Save to ~/.mcp-openapi-proxy/ (0600)
     Note over P: Auto-refreshes when<br/>within 30s of expiry
 ```
 
-**Login** — opens a browser window for Authorization Code + PKCE:
+#### Discovery Modes
+
+The `login` command needs to know the OIDC provider's authorization and token endpoints. Two discovery modes are supported:
+
+**Standard OIDC discovery (recommended)** — works with any OIDC provider (Keycloak, Auth0, Okta, Google, etc.):
 
 ```bash
-# Standard OIDC discovery (recommended — works with any OIDC provider)
-# Discovers endpoints via {issuer}/.well-known/openid-configuration
 MCP_OIDC_ISSUER=https://auth.example.com/realms/myrealm \
 MCP_OIDC_CLIENT_ID=my-client \
 mcp-openapi-proxy login
+```
 
-# Application-specific discovery (requires the API to expose /api/v1/auth/config)
+Fetches `{issuer}/.well-known/openid-configuration` and extracts `authorization_endpoint` and `token_endpoint`. This is the [standard OIDC Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html) mechanism.
+
+**Application-specific discovery** — for APIs that expose a proprietary config endpoint:
+
+```bash
 MCP_BASE_URL=https://api.example.com mcp-openapi-proxy login
 ```
 
-**Check status:**
+Fetches `{baseURL}/api/v1/auth/config` and parses the OIDC provider configuration from the response. This mode only works if your API implements this specific endpoint.
 
-```bash
-mcp-openapi-proxy status
+> [!NOTE]
+> The `MCP_BASE_URL`-only mode is a proprietary extension, not standard OIDC. Use `MCP_OIDC_ISSUER` + `MCP_OIDC_CLIENT_ID` for any generic OIDC provider.
+
+#### Login
+
+The login command opens a browser window, starts a temporary localhost callback server, and waits up to **5 minutes** for the user to authenticate. If the browser doesn't open automatically, the authorization URL is printed to stderr for manual use.
+
+Platform support: macOS (`open`), Linux (`xdg-open`), Windows (`rundll32`).
+
+#### Scopes
+
+Default scopes requested: `openid profile email offline_access`.
+
+The `offline_access` scope is always enforced — if your custom scopes omit it, the proxy appends it automatically. This ensures the provider returns a refresh token for automatic renewal.
+
+#### Token Storage
+
+Tokens are stored at `~/.mcp-openapi-proxy/mcp-openapi-proxy-tokens.json`:
+
+```json
+{
+  "access_token": "eyJhbGci...",
+  "refresh_token": "dGhpcyBp...",
+  "expires_at": "2026-03-22T15:30:00Z",
+  "token_endpoint": "https://auth.example.com/token",
+  "client_id": "my-client"
+}
 ```
 
-**Logout** — removes stored tokens:
+- **File permissions:** `0600` (user read/write only)
+- **Directory permissions:** `0700`
+- **Writes are atomic:** temp file + `rename` to prevent corruption from concurrent processes
+
+#### Token Refresh
+
+The proxy automatically refreshes tokens before they expire:
+
+- **Refresh margin:** 30 seconds before `expires_at`
+- **Refresh timeout:** 15 seconds per attempt
+- **Detached context:** refresh uses `context.Background()` so it won't be cancelled if the agent times out the tool call
+- **Fallback on failure:** if refresh fails but the current token hasn't expired yet, the existing token is used silently
+- **Missing `expires_in`:** if the provider omits `expires_in` from the refresh response, defaults to 1 hour
+
+#### Status and Logout
 
 ```bash
+# Show current auth state
+mcp-openapi-proxy status
+
+# Example output:
+# Status: logged in
+# Token file:     ~/.mcp-openapi-proxy/mcp-openapi-proxy-tokens.json
+# Token endpoint: https://auth.example.com/token
+# Client ID:      my-client
+# Expires at:     2026-03-22T15:30:00Z
+# Remaining:      23m14s
+# Refresh token:  present (auto-refresh enabled)
+```
+
+```bash
+# Remove stored tokens (idempotent — safe to run if already logged out)
 mcp-openapi-proxy logout
 ```
 
-Tokens are stored at `~/.mcp-openapi-proxy/mcp-openapi-proxy-tokens.json` with `0600` permissions. The file is written atomically (temp file + rename).
+#### OIDC Troubleshooting
 
-> [!TIP]
-> If token refresh fails but the current access token hasn't expired yet, the existing token is used as a fallback — no error is surfaced to the agent.
+| Symptom | Cause | Fix |
+|---|---|---|
+| `OIDC discovery from ... failed` | Issuer URL wrong or unreachable | Verify `MCP_OIDC_ISSUER` URL, check `/.well-known/openid-configuration` is accessible |
+| `token endpoint returned 400: ...` | Wrong client ID, expired code, or PKCE mismatch | Check `MCP_OIDC_CLIENT_ID`, run `login` again |
+| `login timed out after 5m0s` | Browser didn't redirect back in time | Check firewall/proxy rules, try the URL printed to stderr manually |
+| `no refresh token received` | Provider not returning refresh tokens | Ensure `offline_access` scope is allowed in your provider config |
+| `API is in dummy-auth mode` | API discovery returned `dummyAuth=true` | Use `MCP_AUTH_TOKEN` with a static token instead |
+| `access token expired and no refresh token` | Refresh token was never stored | Re-run `login` to obtain fresh tokens with `offline_access` |
+| `token refresh failed` | Token endpoint unreachable or refresh token revoked | Check network, re-run `login` |
 
 ## Architecture
 
