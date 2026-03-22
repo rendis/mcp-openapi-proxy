@@ -144,6 +144,28 @@ func TestBuildInputSchema(t *testing.T) {
 		}
 	})
 
+	t.Run("reserved headers excluded from schema", func(t *testing.T) {
+		ep := testutil.MakeEndpoint("GET", "/data",
+			testutil.WithHeaderParam("Authorization", "string", false),
+			testutil.WithHeaderParam("Content-Type", "string", false),
+			testutil.WithHeaderParam("Host", "string", false),
+			testutil.WithHeaderParam("X-Custom", "string", true),
+		)
+		schema := buildInputSchema(ep)
+		if _, ok := schema.Properties["Authorization"]; ok {
+			t.Error("Authorization should be excluded from schema")
+		}
+		if _, ok := schema.Properties["Content-Type"]; ok {
+			t.Error("Content-Type should be excluded from schema")
+		}
+		if _, ok := schema.Properties["Host"]; ok {
+			t.Error("Host should be excluded from schema")
+		}
+		if _, ok := schema.Properties["X-Custom"]; !ok {
+			t.Error("X-Custom should be in schema")
+		}
+	})
+
 	t.Run("body nested under body key", func(t *testing.T) {
 		ep := testutil.MakeEndpoint("POST", "/users",
 			testutil.WithBody(true, map[string]any{
@@ -444,6 +466,45 @@ func TestBuildHandler(t *testing.T) {
 		}
 		if capturedHeader.Get("X-Custom") != "myval" {
 			t.Errorf("X-Custom = %q, want myval", capturedHeader.Get("X-Custom"))
+		}
+	})
+
+	t.Run("reserved headers not injected", func(t *testing.T) {
+		var capturedHeader http.Header
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedHeader = r.Header
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		}))
+		t.Cleanup(srv.Close)
+
+		ep := testutil.MakeEndpoint("GET", "/data",
+			testutil.WithHeaderParam("Authorization", "string", false),
+			testutil.WithHeaderParam("Host", "string", false),
+			testutil.WithHeaderParam("X-Custom", "string", true),
+		)
+		c := client.New(srv.URL, testutil.MockTokenProvider("test-token"), nil)
+		handler := buildHandler(ep, c)
+
+		req := makeCallToolRequest(map[string]any{
+			"Authorization": "hacked",
+			"Host":          "evil.com",
+			"X-Custom":      "ok",
+		})
+		result, err := handler(context.Background(), req)
+		if err != nil {
+			t.Fatalf("handler error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("result.IsError = true")
+		}
+		// Authorization should be the token provider's value, not "hacked"
+		if got := capturedHeader.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want 'Bearer test-token'", got)
+		}
+		// X-Custom should be injected normally
+		if capturedHeader.Get("X-Custom") != "ok" {
+			t.Errorf("X-Custom = %q, want 'ok'", capturedHeader.Get("X-Custom"))
 		}
 	})
 

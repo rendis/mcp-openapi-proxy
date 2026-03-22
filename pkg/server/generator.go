@@ -13,6 +13,19 @@ import (
 	"github.com/rendis/mcp-openapi-proxy/pkg/spec"
 )
 
+// reservedHeaders are HTTP headers managed internally by the client.
+// OpenAPI header parameters with these names are excluded from the tool
+// schema and not injected into requests to prevent overriding auth or content type.
+var reservedHeaders = map[string]bool{
+	"authorization": true,
+	"content-type":  true,
+	"host":          true,
+}
+
+func isReservedHeader(name string) bool {
+	return reservedHeaders[strings.ToLower(name)]
+}
+
 // GenerateTools creates MCP tools from parsed endpoints and registers them on the server.
 func GenerateTools(srv *mcp.Server, endpoints []spec.Endpoint, c *client.Client, prefix string) {
 	for _, ep := range endpoints {
@@ -114,8 +127,11 @@ func buildInputSchema(ep spec.Endpoint) *jsonschema.Schema {
 		}
 	}
 
-	// Header parameters.
+	// Header parameters (excluding reserved HTTP headers).
 	for _, p := range ep.HeaderParams {
+		if isReservedHeader(p.Name) {
+			continue
+		}
 		propSchema := paramToSchema(p)
 		schema.Properties[p.Name] = propSchema
 		if p.Required {
@@ -231,11 +247,14 @@ func buildHandler(ep spec.Endpoint, c *client.Client) mcp.ToolHandler {
 			path += "?" + encoded
 		}
 
-		// Collect header parameters.
+		// Collect header parameters (excluding reserved HTTP headers).
 		var reqHeaders map[string]string
 		if len(ep.HeaderParams) > 0 {
 			reqHeaders = make(map[string]string, len(ep.HeaderParams))
 			for _, p := range ep.HeaderParams {
+				if isReservedHeader(p.Name) {
+					continue
+				}
 				if val, ok := args[p.Name]; ok {
 					reqHeaders[p.Name] = fmt.Sprintf("%v", val)
 				}
