@@ -378,9 +378,13 @@ func extractResponses(op *openapi3.Operation) []ResponseInfo {
 		}
 		resp := respRef.Value
 
+		desc := ""
+		if resp.Description != nil {
+			desc = *resp.Description
+		}
 		ri := ResponseInfo{
 			StatusCode:  code,
-			Description: *resp.Description,
+			Description: desc,
 		}
 
 		// Extract response headers.

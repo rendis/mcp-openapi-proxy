@@ -137,8 +137,9 @@ Pattern: `{prefix}_{method}_{sanitized_path}` — lowercase, special chars → `
 - **Query params** → top-level: `{"page": 1, "limit": 20}` (arrays use repeated keys: `tags=a&tags=b`)
 - **Header params** → top-level: `{"X-Request-Id": "req-001"}` (injected as HTTP headers)
 - **Request body** → nested under `body`: `{"body": {"name": "new user"}}`
-- **Non-JSON responses** → returned as raw text string (not error)
-- **Empty 2xx responses** → `{"status": "ok"}`
+- **Cookie params** → top-level: `{"session": "abc"}` (forwarded as Cookie header)
+- **Output** → Tool has OutputSchema from first 2xx response; response is envelope: `{status, content_type, headers, body}`
+- **Deprecated endpoints** → skipped, not available as tools
 
 ## Multiple APIs
 
@@ -161,4 +162,4 @@ Use distinct prefixes to run side-by-side:
 - **Spec URL unreachable** → fails at startup; check network/VPN
 - **multipart/form-data endpoints** → silently skipped, not generated as tools
 - **application/x-www-form-urlencoded endpoints** → also skipped
-- **Cookie parameters** → not supported, logged as warning and ignored
+- **Deprecated endpoints** → skipped, not registered as tools

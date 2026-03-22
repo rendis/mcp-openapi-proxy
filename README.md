@@ -71,7 +71,6 @@ flowchart LR
 - **No OpenAPI 2.0** — only 3.x specs (convert older specs with [swagger2openapi](https://github.com/Mermade/oas-kit))
 - **No SSE/WebSocket** — stdio transport only
 - **No file uploads** — `multipart/form-data` and `application/x-www-form-urlencoded` endpoints are skipped
-- **No cookie parameters** — cookie params in the spec are logged as a warning and ignored
 
 ## Quick Start
 
@@ -398,11 +397,24 @@ pkg/
 3. Query parameters are URL-encoded: `?include_roles=true` (arrays use repeated keys: `tags=a&tags=b`)
 4. Request body (if present) is extracted from the `body` property and marshaled to JSON
 5. HTTP client sends the request with `Authorization: Bearer <token>` and any extra headers
-6. Response handling:
-   - JSON responses → parsed and formatted as indented JSON
-   - Non-JSON responses (`text/plain`, `text/html`, etc.) → returned as raw text
-   - `204 No Content` or any `2xx` with empty body → `{"status": "ok"}`
+6. Response returned as a structured envelope:
+   ```json
+   {"status": 200, "content_type": "application/json", "headers": {"X-Total-Count": "42"}, "body": {...}}
+   ```
+   - JSON body → parsed object in `body`
+   - Non-JSON (`text/plain`, `text/html`) → raw text string in `body`
+   - Empty `2xx` → `body` is `{"status": "ok"}`
    - `4xx/5xx` → `APIError` with status code and response body
+
+### What the Agent Sees
+
+Each tool exposes the full API contract:
+
+- **InputSchema** — path, query, header, and cookie params as top-level properties + body nested under `"body"`, with constraints (enum, format, min/max)
+- **OutputSchema** — JSON Schema of the success response (derived from the first `2xx` response in the spec)
+- **Description** — HTTP method, path, summary, response status codes with descriptions, auth requirements, and external docs URL
+- **Annotations** — `GET` → read-only, `DELETE` → destructive
+- **Deprecated endpoints** — skipped entirely, never registered as tools
 
 ## Examples
 

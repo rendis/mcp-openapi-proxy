@@ -43,7 +43,13 @@ func Run(cfg Config, tp auth.TokenProvider, extraHeaders map[string]string) erro
 	// Generate and register tools.
 	GenerateTools(srv, endpoints, c, cfg.ToolPrefix)
 
-	fmt.Fprintf(os.Stderr, "mcp-openapi-proxy: registered %d tools from %s\n", len(endpoints), cfg.SpecSource)
+	toolCount := 0
+	for _, ep := range endpoints {
+		if !ep.Deprecated {
+			toolCount++
+		}
+	}
+	fmt.Fprintf(os.Stderr, "mcp-openapi-proxy: registered %d tools from %s\n", toolCount, cfg.SpecSource)
 
 	// Run the stdio transport.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
