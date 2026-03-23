@@ -1,15 +1,16 @@
 # Agent Instructions
 
 ## Project
-Go CLI that converts OpenAPI 3.x specs into MCP stdio servers dynamically — one tool per endpoint, no codegen.
+Go CLI that converts OpenAPI 3.x specs into a lightweight MCP stdio navigator/executor — 3 MCP tools plus indexed endpoint `toolName` identifiers, no codegen.
 
 ## Architecture
 - `cmd/mcp-openapi-proxy/main.go` — CLI entry point, env var parsing, subcommands: serve/login/logout/status
 - `pkg/spec/model.go` — internal OpenAPI model types: endpoints, params, media types, security, servers
 - `pkg/spec/parser.go` — OpenAPI 3.x parser (kin-openapi), validates the spec and extracts Endpoint structs
 - `pkg/server/server.go` — MCP server setup, stdio transport
-- `pkg/server/generator.go` — Endpoint→MCP Tool conversion, naming, descriptions, annotations
-- `pkg/server/schema.go` — JSON Schema generation for tool inputs and output envelopes
+- `pkg/server/generator.go` — endpoint `toolName` / path sanitization helpers
+- `pkg/server/navigator.go` — endpoint index plus the 3 registered MCP tools: list/describe/call
+- `pkg/server/schema.go` — JSON Schema generation for the lightweight navigator tool inputs plus response helpers
 - `pkg/server/runtime.go` — request serialization, auth application, HTTP execution, MCP envelope responses
 - `pkg/client/client.go` — HTTP client execution, content-type aware decoding, response body limits
 - `pkg/client/errors.go` — client transport/body limit errors
@@ -32,15 +33,15 @@ Go CLI that converts OpenAPI 3.x specs into MCP stdio servers dynamically — on
 
 ## Conventions
 - Tests: `go test ./...` — run before committing
-- Tool naming: `{prefix}_{method}_{sanitized_path}` (lowercase, special chars → `_`, collapsed)
+- Registered MCP tools: `{prefix}_list_endpoints`, `{prefix}_describe_endpoint`, `{prefix}_call_endpoint`
+- Endpoint IDs: `{prefix}_{method}_{sanitized_path}` (lowercase, special chars → `_`, collapsed)
 - Auth resolution priority: per-scheme `MCP_AUTH_<SCHEME>_*` > global `MCP_AUTH_TOKEN` > OIDC token cache for `MCP_AUTH_PROFILE`
 - Tokens stored at `~/.mcp-openapi-proxy/{profile}-tokens.json` with 0600 perms
-- Tool input schema is grouped by location: `path`, `query`, `headers`, `cookies`, `body`
-- GET tools → readOnly annotation, DELETE tools → destructive annotation
-- Tool output is always an envelope: `{status, content_type, headers, body}`; OutputSchema is a `oneOf` over declared response variants plus fallback and `proxy_error`
+- `list_endpoints` returns lightweight discovery items with `toolName`, `method`, `path`, `description`, `requiredAuth`, `tags`, `deprecated`
+- `describe_endpoint` returns the full normalized OpenAPI contract for one endpoint
+- `call_endpoint` input uses `toolName` plus `path`, `query`, `headers`, `cookies`, `body`
+- `call_endpoint` output is always an envelope: `{status, content_type, headers, body}` and marks API `4xx/5xx` as `IsError=true`
 - Deprecated endpoints are registered by default and skipped only when `MCP_EXCLUDE_DEPRECATED=1`
-- Tool description enriched with response codes, auth scheme details, external docs URL
-- Handler response keeps the real API response inside the envelope and marks API `4xx/5xx` as `IsError=true`
 - `client.Do()` returns `*client.Response` with StatusCode, Headers, ContentType, RawContentType, Body
 - stdio transport only
 
@@ -49,8 +50,9 @@ Go CLI that converts OpenAPI 3.x specs into MCP stdio servers dynamically — on
 - `jsonschema-go` uses `json.RawMessage` for Default field
 - kin-openapi `SchemaRef.Value.Type` returns `*openapi3.Types` (slice), not a string — use `.Slice()`
 - Version hardcoded as `0.1.0` in `server.go`
+- `swag init` generates Swagger 2.0 output; convert `swagger.json` with `swagger2openapi` before `LoadSpec` / `MCP_SPEC` because this repo only supports OpenAPI 3.x at runtime
 - Authenticated requests to non-loopback `http://` URLs are blocked unless `MCP_ALLOW_INSECURE_HTTP=1`
-- `go-sdk` requires OutputSchema type to be `"object"`; response bodies are therefore wrapped in the envelope schema
+- The registered MCP tools intentionally omit `OutputSchema` to keep `tools/list` small; detailed endpoint contracts come from `describe_endpoint`
 - `multipart/form-data`, `application/x-www-form-urlencoded`, text bodies, and `application/octet-stream` are supported
 - Path/query/header/cookie serialization follows OpenAPI `style` / `explode`; path params are URL-encoded
 - Non-JSON API responses are returned as raw text strings; binary responses are wrapped as base64 objects

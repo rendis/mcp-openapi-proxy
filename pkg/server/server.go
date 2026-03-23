@@ -44,14 +44,14 @@ func Run(cfg Config, extraHeaders map[string]string) error {
 
 	GenerateTools(srv, endpoints, httpClient, authResolver, cfg)
 
-	toolCount := 0
+	indexedEndpointCount := 0
 	for _, ep := range endpoints {
 		if cfg.ExcludeDeprecated && ep.Deprecated {
 			continue
 		}
-		toolCount++
+		indexedEndpointCount++
 	}
-	fmt.Fprintf(os.Stderr, "mcp-openapi-proxy: registered %d tools from %s\n", toolCount, cfg.SpecSource)
+	fmt.Fprintf(os.Stderr, "mcp-openapi-proxy: registered 3 tools for %d indexed endpoints from %s\n", indexedEndpointCount, cfg.SpecSource)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

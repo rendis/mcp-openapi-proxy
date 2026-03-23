@@ -34,6 +34,15 @@ func envelopeFromResult(t *testing.T, result *mcp.CallToolResult) map[string]any
 	return parsed
 }
 
+func listToolsResult(t *testing.T, session *mcp.ClientSession) *mcp.ListToolsResult {
+	t.Helper()
+	res, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	return res
+}
+
 func statusCode(t *testing.T, env map[string]any) int {
 	t.Helper()
 	switch v := env["status"].(type) {
@@ -92,10 +101,7 @@ func newClientSession(t *testing.T, srv *mcp.Server) *mcp.ClientSession {
 
 func listToolNames(t *testing.T, session *mcp.ClientSession) []string {
 	t.Helper()
-	res, err := session.ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
+	res := listToolsResult(t, session)
 	names := make([]string, 0, len(res.Tools))
 	for _, tool := range res.Tools {
 		names = append(names, tool.Name)

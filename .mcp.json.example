@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "my-api": {
+      "command": "mcp-openapi-proxy",
+      "env": {
+        "MCP_SPEC": "./openapi.yaml",
+        "MCP_BASE_URL": "https://api.example.com",
+        "MCP_TOOL_PREFIX": "myapi",
+        "MCP_AUTH_PROFILE": "myapi"
+      }
+    }
+  }
+}

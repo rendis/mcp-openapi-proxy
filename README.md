@@ -2,10 +2,10 @@
 
 # mcp-openapi-proxy
 
-**Turn any OpenAPI 3.x spec into a fully functional MCP server — automatically.**
+**Turn any OpenAPI 3.x spec into a lightweight MCP navigator/executor server — automatically.**
 
 Every REST API has an OpenAPI spec. Every AI agent speaks MCP.<br/>
-This bridge connects the two with zero code — point it at a spec, get MCP tools.
+This bridge connects the two with zero code — point it at a spec, get a usable MCP navigator/executor.
 
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -19,22 +19,22 @@ This bridge connects the two with zero code — point it at a spec, get MCP tool
 
 You have a REST API with 50+ endpoints and an OpenAPI spec that documents every one of them. You want an AI agent (Claude Code, Codex, Gemini CLI) to call your API through MCP. The standard approach: write one MCP tool definition per endpoint — input schemas, handlers, auth wiring — thousands of lines of boilerplate that breaks every time the API changes.
 
-**mcp-openapi-proxy** eliminates that. One binary. One environment variable pointing to your spec. Every endpoint becomes an MCP tool at startup. No codegen, no generated files, no maintenance.
+**mcp-openapi-proxy** eliminates that. One binary. One environment variable pointing to your spec. The proxy indexes every endpoint at startup, then exposes a small MCP navigator/executor surface that agents can actually load. No codegen, no generated files, no maintenance.
 
 And authentication makes it worse. Production APIs use OIDC, OAuth2, or token-based auth — the agent needs valid credentials, tokens that expire need refreshing, and secrets need secure storage. mcp-openapi-proxy handles this end-to-end: static tokens for development, browser-based OIDC PKCE for production, with automatic token refresh and secure on-disk storage.
 
 ## How It Works
 
 <p align="center">
-  <img src="docs/assets/architecture/architecture.svg" alt="Architecture diagram showing OpenAPI spec flowing through parser, tool generator, and MCP server to connect AI agents with target APIs" width="780"/>
+  <img src="docs/assets/architecture/architecture.svg" alt="Architecture diagram showing OpenAPI spec flowing through parser, endpoint indexing, and a 3-tool MCP server to connect AI agents with target APIs" width="780"/>
 </p>
 
 ```mermaid
 flowchart LR
     A["OpenAPI Spec<br/><small>YAML · JSON · URL</small>"] --> B["Spec Parser<br/><small>kin-openapi</small>"]
     B --> C["Endpoints[]"]
-    C --> D["Tool Generator<br/><small>name + schema + handler</small>"]
-    D --> E["MCP Server<br/><small>stdio</small>"]
+    C --> D["Endpoint Index<br/><small>toolName + metadata</small>"]
+    D --> E["3 MCP Tools<br/><small>list · describe · call</small>"]
     E <-->|"tool calls"| F["AI Agent<br/><small>Claude · Codex · Gemini</small>"]
 
     style A fill:#24283b,stroke:#bb9af7,color:#bb9af7
@@ -46,22 +46,23 @@ flowchart LR
 ```
 
 1. The OpenAPI spec is loaded and parsed into a list of endpoints (method, path, parameters, request body)
-2. Each endpoint becomes an MCP tool with a JSON Schema input derived from its parameters and body
-3. A handler is generated for each tool that builds the HTTP request and calls your API with auth
-4. The MCP server runs over stdio, ready to receive tool calls from any MCP client
+2. Each endpoint gets a stable `toolName` identifier using `{prefix}_{method}_{sanitized_path}`
+3. The proxy registers exactly three MCP tools: `list_endpoints`, `describe_endpoint`, and `call_endpoint`
+4. Agents discover endpoints cheaply, fetch the full contract only when needed, and execute calls through the shared HTTP runtime
 
 ## Features
 
 - **OpenAPI 3.x** — parses paths, parameters, request bodies, and security schemes via [kin-openapi](https://github.com/getkin/kin-openapi)
 - **Local and remote specs** — load from a file path or any `http://` / `https://` URL
-- **One tool per endpoint** — auto-generated with full JSON Schema input validation
-- **Tool annotations** — `GET` → read-only, `DELETE` → destructive
+- **Navigator/executor MCP surface** — exactly 3 tools per server, regardless of API size
+- **Stable endpoint identifiers** — every endpoint still gets a deterministic `toolName`
 - **Production-ready authentication** — built-in OIDC Authorization Code + PKCE flow with browser-based login, automatic token refresh, and secure on-disk storage (`0600`). Works with any OIDC provider: Keycloak, Auth0, Okta, Google, and more. No auth code to write.
 - **Development auth** — static bearer token via `MCP_AUTH_TOKEN` or per-scheme credentials via `MCP_AUTH_<SCHEME>_*`
 - **Spec-aware auth resolution** — resolves `http bearer`, `http basic`, `apiKey`, `oauth2`, and `openIdConnect` from OpenAPI security requirements
 - **Configurable tool prefix** — namespace tools to avoid collisions when running multiple proxies
 - **Extra headers** — inject custom headers (workspace IDs, API versions) into every request
-- **Structured MCP output** — every tool returns a typed envelope with `status`, `content_type`, `headers`, and `body`
+- **Lightweight discovery** — `tools/list` stays small while `describe_endpoint` exposes the full OpenAPI contract on demand
+- **Structured call output** — `call_endpoint` returns a typed envelope with `status`, `content_type`, `headers`, and `body`
 - **Forms and binary payloads** — supports `multipart/form-data`, `application/x-www-form-urlencoded`, text payloads, and `application/octet-stream`
 - **stdio transport** — compatible with Claude Code, OpenAI Codex, Gemini CLI, and any MCP client
 
@@ -88,6 +89,34 @@ mcp-openapi-proxy
 
 If `MCP_BASE_URL` is omitted, the proxy falls back to a single absolute server declared in the OpenAPI spec when one can be resolved unambiguously.
 
+### Minimal setup flow
+
+1. Install the binary:
+
+   ```bash
+   go install github.com/rendis/mcp-openapi-proxy/cmd/mcp-openapi-proxy@latest
+   ```
+
+2. Start from the generic Claude Code example in [`.mcp.json.example`](./.mcp.json.example) and copy it into your project as `.mcp.json`.
+
+3. Choose one auth path:
+   - Static token: add `MCP_AUTH_TOKEN` to `.mcp.json`
+   - OIDC login: add `MCP_OIDC_ISSUER` and `MCP_OIDC_CLIENT_ID` to `.mcp.json`, then run `mcp-openapi-proxy login` once with the same values
+
+4. Open your MCP client and use the server through `list_endpoints`, `describe_endpoint`, and `call_endpoint`.
+
+### If your spec comes from `swag init`
+
+`swag init` generates Swagger 2.0 output. `mcp-openapi-proxy` only accepts OpenAPI 3.x specs, so do not point `MCP_SPEC` directly at the generated `swagger.json`.
+
+Convert it first, then use the converted OpenAPI 3.x file:
+
+```bash
+swag init -g cmd/api/main.go
+swagger2openapi ./docs/swagger.json -o ./docs/openapi.json
+MCP_SPEC=./docs/openapi.json mcp-openapi-proxy
+```
+
 ## Installation
 
 ```bash
@@ -109,7 +138,7 @@ All configuration is done through environment variables.
 |---|---|---|---|
 | `MCP_SPEC` | Yes | — | Path or URL to an OpenAPI 3.x spec (YAML or JSON) |
 | `MCP_BASE_URL` | No | — | Explicit API base URL. If omitted, the proxy uses a single absolute OpenAPI server when available |
-| `MCP_TOOL_PREFIX` | No | `api` | Prefix for generated tool names |
+| `MCP_TOOL_PREFIX` | No | `api` | Prefix for the 3 MCP navigator tools and for endpoint `toolName` identifiers |
 | `MCP_AUTH_PROFILE` | No | `MCP_TOOL_PREFIX` or `default` | Namespace for stored OIDC tokens |
 | `MCP_AUTH_TOKEN` | No | — | Global bearer token fallback |
 | `MCP_OIDC_ISSUER` | No | — | OIDC issuer URL (used with `login` command) |
@@ -140,6 +169,8 @@ All configuration is done through environment variables.
 <details>
 <summary><strong>Claude Code</strong> — <code>.mcp.json</code></summary>
 
+Generic example:
+
 ```json
 {
   "mcpServers": {
@@ -149,11 +180,59 @@ All configuration is done through environment variables.
         "MCP_SPEC": "./openapi.yaml",
         "MCP_BASE_URL": "https://api.example.com",
         "MCP_TOOL_PREFIX": "myapi",
+        "MCP_AUTH_PROFILE": "myapi"
+      }
+    }
+  }
+}
+```
+
+Static token variant:
+
+```json
+{
+  "mcpServers": {
+    "my-api": {
+      "command": "mcp-openapi-proxy",
+      "env": {
+        "MCP_SPEC": "./openapi.yaml",
+        "MCP_BASE_URL": "https://api.example.com",
+        "MCP_TOOL_PREFIX": "myapi",
+        "MCP_AUTH_PROFILE": "myapi",
         "MCP_AUTH_TOKEN": "your-token"
       }
     }
   }
 }
+```
+
+OIDC variant:
+
+```json
+{
+  "mcpServers": {
+    "my-api": {
+      "command": "mcp-openapi-proxy",
+      "env": {
+        "MCP_SPEC": "./openapi.yaml",
+        "MCP_BASE_URL": "https://api.example.com",
+        "MCP_TOOL_PREFIX": "myapi",
+        "MCP_AUTH_PROFILE": "myapi",
+        "MCP_OIDC_ISSUER": "https://auth.example.com/realms/myrealm",
+        "MCP_OIDC_CLIENT_ID": "my-client"
+      }
+    }
+  }
+}
+```
+
+If you use the OIDC variant, run login once before starting Claude Code:
+
+```bash
+MCP_AUTH_PROFILE=myapi \
+MCP_OIDC_ISSUER=https://auth.example.com/realms/myrealm \
+MCP_OIDC_CLIENT_ID=my-client \
+mcp-openapi-proxy login
 ```
 
 </details>
@@ -195,9 +274,21 @@ MCP_AUTH_TOKEN = "your-token"
 
 </details>
 
-## Tool Naming
+## MCP Surface
 
-Each endpoint becomes an MCP tool with the naming pattern:
+The server always registers exactly these 3 MCP tools:
+
+| Tool | Purpose |
+|---|---|
+| `{prefix}_list_endpoints` | Lightweight discovery with filtering and pagination |
+| `{prefix}_describe_endpoint` | Full OpenAPI contract for one endpoint |
+| `{prefix}_call_endpoint` | Execute one endpoint by `toolName` |
+
+Agents should always inspect these registered tools first. The proxy no longer exposes one MCP tool per endpoint.
+
+### Endpoint IDs
+
+Each OpenAPI operation still gets a stable identifier called `toolName`:
 
 ```
 {prefix}_{method}_{sanitized_path}
@@ -205,26 +296,27 @@ Each endpoint becomes an MCP tool with the naming pattern:
 
 Path segments are lowercased. Special characters (`/`, `-`, `{`, `}`, `.`) are replaced with underscores. Consecutive underscores are collapsed.
 
-| Method | Path | Prefix | Tool Name |
+| Method | Path | Prefix | Endpoint `toolName` |
 |---|---|---|---|
 | GET | `/users` | `api` | `api_get_users` |
 | POST | `/users` | `api` | `api_post_users` |
 | GET | `/users/{id}` | `api` | `api_get_users_id` |
-| PUT | `/users/{id}/roles` | `api` | `api_put_users_id_roles` |
 | DELETE | `/admin/features/{key}` | `fe` | `fe_delete_admin_features_key` |
 | GET | `/v1/health.check` | `svc` | `svc_get_v1_health_check` |
 
-### Tool Discovery
+`toolName` is the identifier passed to `describe_endpoint` and `call_endpoint`. It is no longer a registered MCP tool by itself.
 
-Agents and client integrations should always discover the actual registered tools first and then call the exact tool names returned by the MCP server.
+### Discovery Flow
 
-- List available tools before invoking them
-- Use the exact runtime-generated tool name
-- Do not infer names from `operationId`, summaries, or semantic verbs like `list`, `create`, or `toggle`
+Recommended agent flow:
+
+1. Call `{prefix}_list_endpoints` to find candidate endpoints quickly
+2. Call `{prefix}_describe_endpoint` for the exact endpoint contract
+3. Call `{prefix}_call_endpoint` with `toolName` plus `path/query/headers/cookies/body`
 
 **Feature Flags API example** with `MCP_TOOL_PREFIX=fe`:
 
-| Operation | Real Tool Name |
+| Operation | Endpoint `toolName` |
 |---|---|
 | `GET /admin/features` | `fe_get_admin_features` |
 | `POST /admin/features` | `fe_post_admin_features` |
@@ -232,72 +324,85 @@ Agents and client integrations should always discover the actual registered tool
 | `PATCH /admin/features/{key}/toggle` | `fe_patch_admin_features_key_toggle` |
 | `GET /admin/workspaces` | `fe_get_admin_workspaces` |
 
-There is no semantic alias layer in the product. Do not invent alternate names based on verbs like `list`, `create`, `get`, or `toggle`; only the generated runtime names are part of the contract.
+There is no semantic alias layer in the product. Do not invent names from verbs like `list`, `create`, or `toggle`.
 
-### Input Schema
+### `list_endpoints`
 
-Each tool receives an object grouped by HTTP location:
+Input:
 
 ```json
 {
-  "path": {},
-  "query": {},
-  "headers": {},
-  "cookies": {},
-  "body": {}
+  "q": "feature",
+  "tag": "admin",
+  "path_prefix": "/admin",
+  "method": "PATCH",
+  "auth": "bearer",
+  "deprecated": false,
+  "cursor": "Mg",
+  "limit": 25
 }
 ```
 
-Only the sections used by the operation are present, and every section has `additionalProperties: false`.
-
-**Example** — `PATCH /users/{id}` with query and merge-patch body:
+Output:
 
 ```json
 {
+  "items": [
+    {
+      "toolName": "fe_patch_admin_features_key_toggle",
+      "method": "PATCH",
+      "path": "/admin/features/{key}/toggle",
+      "description": "Toggle a feature flag",
+      "requiredAuth": "bearer",
+      "tags": ["flags", "admin"],
+      "deprecated": false
+    }
+  ],
+  "nextCursor": ""
+}
+```
+
+### `describe_endpoint`
+
+Input:
+
+```json
+{
+  "toolName": "fe_patch_admin_features_key_toggle"
+}
+```
+
+Output includes the full normalized contract for that endpoint:
+
+- `toolName`, `method`, `path`, `summary`, `description`, `deprecated`
+- `requiredAuth` and full `securityRequirements`
+- `parameters.path/query/headers/cookies` with schemas by location
+- `requestBody` with media types, schema, examples, and encoding hints
+- `responses` with status, description, headers, and body schemas
+- `externalDocs`, `servers`, `baseURLHint`
+
+### `call_endpoint`
+
+Input:
+
+```json
+{
+  "toolName": "fe_patch_admin_features_key_toggle",
   "path": {
-    "id": "abc123"
-  },
-  "query": {
-    "include_roles": true
+    "key": "checkout"
   },
   "headers": {
     "X-Workspace": "acme"
   },
   "body": {
-    "name": "Jane Doe"
+    "enabled": true
   }
 }
 ```
 
 Workspace context is passed as a header per request, for example `headers: {"X-Workspace": "acme"}`, or globally through `MCP_EXTRA_HEADERS`. There is no separate `set_workspace` tool.
 
-If a request body supports multiple media types, the `body` section becomes:
-
-```json
-{
-  "body": {
-    "content_type": "application/json",
-    "value": {
-      "name": "Jane Doe"
-    }
-  }
-}
-```
-
-Binary request bodies and multipart file parts use:
-
-```json
-{
-  "source": "base64",
-  "data_base64": "aGVsbG8=",
-  "filename": "hello.txt",
-  "content_type": "text/plain"
-}
-```
-
-### Output Envelope
-
-Every tool returns the same envelope in both MCP `StructuredContent` and pretty JSON text:
+`call_endpoint` returns the same envelope in both MCP `StructuredContent` and pretty JSON text:
 
 ```json
 {
@@ -327,6 +432,8 @@ Set `MCP_AUTH_TOKEN` to any bearer token. The proxy sends it as `Authorization: 
 ```bash
 MCP_AUTH_TOKEN=dev-token mcp-openapi-proxy
 ```
+
+If you use Claude Code, the same token can be placed directly in `.mcp.json` under `env.MCP_AUTH_TOKEN`. For shared repositories, prefer keeping the token outside version control and injecting it locally.
 
 ### Per-Scheme Credentials
 
@@ -389,6 +496,8 @@ MCP_OIDC_ISSUER=https://auth.example.com/realms/myrealm \
 MCP_OIDC_CLIENT_ID=my-client \
 mcp-openapi-proxy login
 ```
+
+When you use an MCP client config file such as `.mcp.json`, keep the same `MCP_AUTH_PROFILE`, `MCP_OIDC_ISSUER`, and `MCP_OIDC_CLIENT_ID` values there so the running server reads the token cache created by `login`.
 
 Fetches `{issuer}/.well-known/openid-configuration` and extracts `authorization_endpoint` and `token_endpoint`. This is the [standard OIDC Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html) mechanism.
 
@@ -487,9 +596,10 @@ cmd/mcp-openapi-proxy/       Entry point, CLI subcommands, env var parsing
 pkg/
   spec/                      OpenAPI 3.x parser (kin-openapi)
     parser.go                Loads spec from file or URL, extracts endpoints
-  server/                    MCP server setup and tool generation
+  server/                    MCP server setup, endpoint index, and navigator tools
     server.go                Creates MCP server, runs stdio transport
-    generator.go             Converts endpoints to MCP tools, builds handlers
+    generator.go             Endpoint `toolName` and path sanitization helpers
+    navigator.go             Builds the endpoint index and registers list/describe/call
   auth/                      Authentication providers
     provider.go              TokenProvider interface + StaticTokenProvider
     oidc_provider.go         OIDC token storage, loading, and transparent refresh
@@ -504,15 +614,17 @@ pkg/
 
 ### Request Lifecycle
 
-1. Agent calls a tool with location-aware input sections, for example:
+1. Agent calls `list_endpoints` with optional filters and gets lightweight endpoint metadata plus `toolName`
+2. Agent optionally calls `describe_endpoint` for the full contract of one endpoint
+3. Agent calls `call_endpoint` with `toolName` plus location-aware input sections, for example:
    ```json
-   {"path": {"id": "abc123"}, "query": {"include_roles": true}}
+   {"toolName": "api_patch_users_id", "path": {"id": "abc123"}, "query": {"include_roles": true}}
    ```
-2. Handler resolves the base URL from `MCP_BASE_URL` or a single usable OpenAPI `server`
-3. Path, query, header, and cookie parameters are serialized with their declared OpenAPI `style` and `explode` rules
-4. Request bodies are encoded using the selected declared media type (`application/json`, `multipart/form-data`, `application/x-www-form-urlencoded`, `text/*`, `application/octet-stream`, etc.)
-5. Auth is resolved from the endpoint security requirements (bearer, basic, apiKey, oauth2, openIdConnect) plus any configured extra headers
-6. Response returned as a structured envelope:
+4. Handler resolves the base URL from `MCP_BASE_URL` or a single usable OpenAPI `server`
+5. Path, query, header, and cookie parameters are serialized with their declared OpenAPI `style` and `explode` rules
+6. Request bodies are encoded using the selected declared media type (`application/json`, `multipart/form-data`, `application/x-www-form-urlencoded`, `text/*`, `application/octet-stream`, etc.)
+7. Auth is resolved from the endpoint security requirements (bearer, basic, apiKey, oauth2, openIdConnect) plus any configured extra headers
+8. Response returned as a structured envelope:
    ```json
    {"status": 200, "content_type": "application/json", "headers": {"X-Total-Count": ["42"]}, "body": {...}}
    ```
@@ -525,13 +637,12 @@ pkg/
 
 ### What the Agent Sees
 
-Each tool exposes the API contract in MCP shape:
+The agent sees a small, stable MCP surface:
 
-- **InputSchema** — location-aware sections: `path`, `query`, `headers`, `cookies`, and `body`, each with `additionalProperties: false`
-- **OutputSchema** — `oneOf` envelopes for declared `(status, media type, body)` response variants, plus fallback and `proxy_error` variants
-- **Description** — HTTP method, path, summary, response status codes, auth requirements, scopes, media types, and external docs URL
-- **Annotations** — `GET` → read-only, `DELETE` → destructive
-- **Deprecated endpoints** — registered by default and marked as deprecated; disable them with `MCP_EXCLUDE_DEPRECATED=1`
+- **`list_endpoints`** — cheap discovery with `toolName`, `method`, `path`, `description`, `requiredAuth`, `tags`, `deprecated`
+- **`describe_endpoint`** — the full normalized OpenAPI contract for one endpoint
+- **`call_endpoint`** — the shared execution tool; it returns the HTTP envelope and reuses the full runtime auth/serialization behavior
+- **Deprecated endpoints** — listed by default and removed from the index only when `MCP_EXCLUDE_DEPRECATED=1`
 
 ## Examples
 
@@ -633,7 +744,7 @@ If you already installed the skill globally, reinstall or republish it after upd
 | `401 Unauthorized` on tool calls | Missing per-scheme auth or expired token | Set `MCP_AUTH_<SCHEME>_*`, `MCP_AUTH_TOKEN`, or run `mcp-openapi-proxy login` |
 | `authentication required but not configured` | The endpoint's OpenAPI security requirement could not be satisfied | Configure credentials for one of the declared auth alternatives |
 | `insecure_transport` proxy error | Authenticated request targets non-loopback `http://` | Use HTTPS or set `MCP_ALLOW_INSECURE_HTTP=1` explicitly |
-| Parse error on spec | Spec is Swagger 2.0, not OpenAPI 3.x | Convert with [swagger2openapi](https://github.com/Mermade/oas-kit) first |
+| Parse error on spec | Spec is Swagger 2.0 output, often generated by `swag init`, not OpenAPI 3.x | Convert `swagger.json` with [swagger2openapi](https://github.com/Mermade/oas-kit) and point `MCP_SPEC` at the converted OpenAPI 3.x file |
 | `warning: no auth token configured` | No global token and no prior OIDC login | Expected if your API doesn't require auth; otherwise configure credentials |
 
 ## Tech Stack

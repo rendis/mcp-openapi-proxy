@@ -1,11 +1,11 @@
 ---
 name: mcp-openapi-proxy
-description: Use when connecting a REST API to an MCP client, setting up mcp-openapi-proxy, configuring OpenAPI specs as MCP tools, or authenticating with OIDC/static tokens for API proxying.
+description: Use when connecting a REST API to an MCP client, setting up mcp-openapi-proxy, exposing an OpenAPI-backed navigator/executor MCP server, or authenticating with OIDC/static tokens for API proxying.
 ---
 
 # mcp-openapi-proxy
 
-Turns any OpenAPI 3.x spec into a fully functional MCP stdio server. One tool per endpoint, dynamic at startup, no codegen.
+Turns any OpenAPI 3.x spec into a lightweight MCP stdio navigator/executor. The server always exposes 3 MCP tools and uses `toolName` identifiers to refer to individual endpoints.
 
 For exhaustive reference, see the repository `README.md`. This skill is the short operational guide for installing the binary, wiring it into an MCP client, and using the current tool contract correctly.
 
@@ -28,13 +28,31 @@ mcp-openapi-proxy
 
 `MCP_BASE_URL` is optional when the OpenAPI spec resolves to a single absolute `server`.
 
+Recommended setup flow:
+
+1. Install `mcp-openapi-proxy`
+2. Create `.mcp.json` from the generic example in [`.mcp.json.example`](../../.mcp.json.example)
+3. Choose auth:
+   - Static token: add `MCP_AUTH_TOKEN`
+   - OIDC: add `MCP_OIDC_ISSUER` and `MCP_OIDC_CLIENT_ID`, then run `mcp-openapi-proxy login`
+4. Start the MCP client
+5. Use `list_endpoints`, `describe_endpoint`, and `call_endpoint`
+
+If the source spec comes from `swag init`, convert it before using the proxy. `swag init` emits Swagger 2.0, while `mcp-openapi-proxy` expects OpenAPI 3.x:
+
+```bash
+swag init -g cmd/api/main.go
+swagger2openapi ./docs/swagger.json -o ./docs/openapi.json
+MCP_SPEC=./docs/openapi.json mcp-openapi-proxy
+```
+
 ## Configuration
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `MCP_SPEC` | Yes | — | Path or URL to OpenAPI 3.x spec (YAML/JSON) |
 | `MCP_BASE_URL` | No | — | Explicit API base URL. If omitted, the proxy uses a single absolute OpenAPI server when available |
-| `MCP_TOOL_PREFIX` | No | `api` | Prefix for tool names |
+| `MCP_TOOL_PREFIX` | No | `api` | Prefix for the 3 MCP tools and endpoint `toolName` identifiers |
 | `MCP_AUTH_PROFILE` | No | `MCP_TOOL_PREFIX` or `default` | Namespace for stored OIDC tokens |
 | `MCP_AUTH_TOKEN` | No | — | Global bearer token fallback |
 | `MCP_OIDC_ISSUER` | No | — | OIDC issuer URL |
@@ -49,6 +67,8 @@ mcp-openapi-proxy
 
 ### Claude Code (`.mcp.json`)
 
+Generic example:
+
 ```json
 {
   "mcpServers": {
@@ -58,7 +78,46 @@ mcp-openapi-proxy
         "MCP_SPEC": "./openapi.yaml",
         "MCP_BASE_URL": "https://api.example.com",
         "MCP_TOOL_PREFIX": "myapi",
+        "MCP_AUTH_PROFILE": "myapi"
+      }
+    }
+  }
+}
+```
+
+Static token variant:
+
+```json
+{
+  "mcpServers": {
+    "my-api": {
+      "command": "mcp-openapi-proxy",
+      "env": {
+        "MCP_SPEC": "./openapi.yaml",
+        "MCP_BASE_URL": "https://api.example.com",
+        "MCP_TOOL_PREFIX": "myapi",
+        "MCP_AUTH_PROFILE": "myapi",
         "MCP_AUTH_TOKEN": "your-token"
+      }
+    }
+  }
+}
+```
+
+OIDC variant:
+
+```json
+{
+  "mcpServers": {
+    "my-api": {
+      "command": "mcp-openapi-proxy",
+      "env": {
+        "MCP_SPEC": "./openapi.yaml",
+        "MCP_BASE_URL": "https://api.example.com",
+        "MCP_TOOL_PREFIX": "myapi",
+        "MCP_AUTH_PROFILE": "myapi",
+        "MCP_OIDC_ISSUER": "https://auth.example.com/realms/myrealm",
+        "MCP_OIDC_CLIENT_ID": "my-client"
       }
     }
   }
@@ -108,6 +167,8 @@ Credential resolution order is:
 
 Set `MCP_AUTH_TOKEN` to provide a global bearer fallback for bearer-compatible schemes.
 
+For Claude Code, the usual place is `.mcp.json -> mcpServers.<name>.env.MCP_AUTH_TOKEN`.
+
 ### Per-Scheme Credentials
 
 Use the OpenAPI security scheme name, uppercased and sanitized by replacing `.`, `-`, `/`, and spaces with underscores.
@@ -135,6 +196,8 @@ MCP_OIDC_CLIENT_ID=my-client \
 mcp-openapi-proxy login
 ```
 
+If your MCP client uses `.mcp.json`, keep the same `MCP_AUTH_PROFILE`, `MCP_OIDC_ISSUER`, and `MCP_OIDC_CLIENT_ID` values there so the running server uses the token cache created by `login`.
+
 **Application-specific discovery:**
 
 ```bash
@@ -151,21 +214,27 @@ Scopes come from `MCP_OIDC_SCOPES` when set. Otherwise, if `MCP_SPEC` is availab
 
 Tokens are stored at `~/.mcp-openapi-proxy/<profile>-tokens.json`, where `<profile>` comes from `MCP_AUTH_PROFILE` or falls back to the tool prefix / `default`.
 
-## Tool Naming
+## Registered Tools and Endpoint IDs
 
-Pattern: `{prefix}_{method}_{sanitized_path}` — lowercase, special chars → `_`, collapsed.
+The MCP server always exposes exactly these tools:
 
-| Method | Path | Prefix | Tool Name |
-|---|---|---|---|
-| GET | `/users` | `api` | `api_get_users` |
-| POST | `/users/{id}/roles` | `api` | `api_post_users_id_roles` |
-| DELETE | `/admin/features/{key}` | `fe` | `fe_delete_admin_features_key` |
+- `{prefix}_list_endpoints`
+- `{prefix}_describe_endpoint`
+- `{prefix}_call_endpoint`
 
-Discover tools from the running MCP server and call the exact names it exposes. Do not invent aliases from summaries, operation IDs, or verbs like `list`, `create`, or `toggle`.
+Always inspect the registered tools first. Do not assume the server exposes one MCP tool per endpoint anymore.
+
+Each OpenAPI endpoint still has a stable `toolName`:
+
+```text
+{prefix}_{method}_{sanitized_path}
+```
+
+That `toolName` is the identifier you pass into `describe_endpoint` and `call_endpoint`.
 
 **Feature Flags API example** with `MCP_TOOL_PREFIX=fe`:
 
-| Operation | Real Tool Name |
+| Operation | Endpoint `toolName` |
 |---|---|
 | `GET /admin/features` | `fe_get_admin_features` |
 | `POST /admin/features` | `fe_post_admin_features` |
@@ -173,57 +242,91 @@ Discover tools from the running MCP server and call the exact names it exposes. 
 | `PATCH /admin/features/{key}/toggle` | `fe_patch_admin_features_key_toggle` |
 | `GET /admin/workspaces` | `fe_get_admin_workspaces` |
 
-There is no semantic alias layer in the product. Do not invent alternate names from verbs like `list`, `create`, `get`, `toggle`, or resource labels; only the generated runtime names are valid.
+Names like `fe_list_features` or `fe_toggle_feature` are not part of the product contract.
 
 ## Input and Output Contract
 
-Each tool input is grouped by HTTP location:
+Recommended agent flow:
+
+1. Call `{prefix}_list_endpoints`
+2. Pick a `toolName`
+3. Call `{prefix}_describe_endpoint` if you need the exact contract
+4. Call `{prefix}_call_endpoint`
+
+### `list_endpoints`
+
+Input:
 
 ```json
 {
-  "path": {},
-  "query": {},
-  "headers": {},
-  "cookies": {},
-  "body": {}
+  "q": "feature",
+  "path_prefix": "/admin",
+  "method": "PATCH",
+  "auth": "bearer",
+  "limit": 25
 }
 ```
 
-Only the sections used by the operation are present. Each section has `additionalProperties: false`.
-
-Example:
+Output:
 
 ```json
 {
+  "items": [
+    {
+      "toolName": "fe_patch_admin_features_key_toggle",
+      "method": "PATCH",
+      "path": "/admin/features/{key}/toggle",
+      "description": "Toggle a feature flag",
+      "requiredAuth": "bearer",
+      "tags": ["flags", "admin"],
+      "deprecated": false
+    }
+  ],
+  "nextCursor": ""
+}
+```
+
+### `describe_endpoint`
+
+Input:
+
+```json
+{
+  "toolName": "fe_patch_admin_features_key_toggle"
+}
+```
+
+Output includes:
+
+- `toolName`, `method`, `path`, `summary`, `description`, `deprecated`
+- `requiredAuth` and full `securityRequirements`
+- `parameters.path/query/headers/cookies`
+- `requestBody` with media types, schema, examples, and encoding
+- `responses` with status, description, headers, and body schemas
+- `externalDocs`, `servers`, `baseURLHint`
+
+### `call_endpoint`
+
+Input:
+
+```json
+{
+  "toolName": "fe_patch_admin_features_key_toggle",
   "path": {
-    "id": "abc123"
-  },
-  "query": {
-    "include_roles": true
+    "key": "checkout"
   },
   "headers": {
     "X-Workspace": "acme"
   },
   "body": {
-    "name": "Jane Doe"
+    "enabled": true
   }
 }
 ```
 
-If an operation supports multiple request body media types, `body` becomes:
+`X-Workspace` is sent in `headers` per request or configured globally with `MCP_EXTRA_HEADERS`. Workspace selection is header-based, not a dedicated tool.
 
-```json
-{
-  "body": {
-    "content_type": "application/json",
-    "value": {
-      "name": "Jane Doe"
-    }
-  }
-}
-```
-
-Every tool returns the same envelope in MCP `StructuredContent` and pretty JSON text:
+`call_endpoint` returns the HTTP envelope:
 
 ```json
 {
@@ -241,9 +344,7 @@ Every tool returns the same envelope in MCP `StructuredContent` and pretty JSON 
 - API `4xx/5xx` responses preserve the real HTTP response and set `IsError=true`
 - Proxy/runtime failures return `status: 0` plus `proxy_error`
 - Binary payloads are represented as base64 wrappers
-- Deprecated endpoints are registered by default and only excluded with `MCP_EXCLUDE_DEPRECATED=1`
-
-`X-Workspace` is sent in `headers` per request or configured globally with `MCP_EXTRA_HEADERS`. Workspace selection is header-based, not a dedicated tool.
+- Deprecated endpoints are listed by default and only excluded with `MCP_EXCLUDE_DEPRECATED=1`
 
 ## Multiple APIs
 
@@ -262,11 +363,11 @@ Use distinct prefixes to run side-by-side:
 
 - **Missing `MCP_SPEC`** → startup fails immediately
 - **No usable base URL** → set `MCP_BASE_URL` explicitly or declare a single absolute OpenAPI `server`
-- **Swagger 2.0 spec** → not supported; convert with `swagger2openapi` first
+- **Spec generated by `swag init`** → detect `swagger: "2.0"` or a generated `swagger.json`, convert it with `swagger2openapi`, then point `MCP_SPEC` at the resulting OpenAPI 3.x file
 - **Missing per-scheme auth** → configure `MCP_AUTH_<SCHEME>_*`, `MCP_AUTH_TOKEN`, or run `mcp-openapi-proxy login`
 - **Spec URL unreachable** → fails at startup; check network/VPN
 - **Authenticated calls to non-loopback `http://`** → blocked unless `MCP_ALLOW_INSECURE_HTTP=1`
-- **Using the old flat input contract** → current tools expect `path/query/headers/cookies/body`, not top-level params
-- **Assuming semantic tool names** → always inspect the registered tools first and call the exact generated name
+- **Treating endpoints as MCP tools** → endpoints are discovered as `toolName` values; only `list_endpoints`, `describe_endpoint`, and `call_endpoint` are registered
+- **Calling `call_endpoint` without discovery** → list first, then describe if needed, then call with `toolName`
 
 For exhaustive reference, examples, and troubleshooting, see the repository `README.md`.

@@ -30,7 +30,10 @@ func callEndpoint(ctx context.Context, ep spec.Endpoint, httpClient *client.Clie
 	if err != nil {
 		return proxyErrorResult("invalid_arguments", err.Error(), nil), nil
 	}
+	return callEndpointArgs(ctx, ep, httpClient, authResolver, cfg, args)
+}
 
+func callEndpointArgs(ctx context.Context, ep spec.Endpoint, httpClient *client.Client, authResolver *auth.Resolver, cfg Config, args map[string]any) (*mcp.CallToolResult, error) {
 	appliedAuth, err := authResolver.Resolve(ctx, ep.SecurityRequirements)
 	if err != nil {
 		return proxyErrorResult("auth_required", err.Error(), nil), nil

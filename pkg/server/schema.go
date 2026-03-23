@@ -10,51 +10,55 @@ import (
 	"github.com/rendis/mcp-openapi-proxy/pkg/spec"
 )
 
-func buildInputSchema(ep spec.Endpoint) *jsonschema.Schema {
-	root := map[string]any{
-		"type":                 "object",
-		"properties":           map[string]any{},
+func buildListEndpointsInputSchema() *jsonschema.Schema {
+	return mapToJSONSchema(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"q":           map[string]any{"type": "string"},
+			"tag":         map[string]any{"type": "string"},
+			"path_prefix": map[string]any{"type": "string"},
+			"method":      map[string]any{"type": "string"},
+			"auth":        map[string]any{"type": "string"},
+			"deprecated":  map[string]any{"type": "boolean"},
+			"cursor":      map[string]any{"type": "string"},
+			"limit":       map[string]any{"type": "integer", "minimum": 1, "maximum": maxEndpointListLimit},
+		},
 		"additionalProperties": false,
-	}
+	})
+}
 
-	properties := root["properties"].(map[string]any)
-	var required []string
+func buildDescribeEndpointInputSchema() *jsonschema.Schema {
+	return mapToJSONSchema(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"toolName": map[string]any{"type": "string"},
+		},
+		"required":             []string{"toolName"},
+		"additionalProperties": false,
+	})
+}
 
-	if section := buildParameterSectionSchema(ep.PathParams); section != nil {
-		properties["path"] = section
-		if hasRequiredParams(ep.PathParams) {
-			required = append(required, "path")
-		}
-	}
-	if section := buildParameterSectionSchema(ep.QueryParams); section != nil {
-		properties["query"] = section
-		if hasRequiredParams(ep.QueryParams) {
-			required = append(required, "query")
-		}
-	}
-	if section := buildParameterSectionSchema(ep.HeaderParams); section != nil {
-		properties["headers"] = section
-		if hasRequiredParams(ep.HeaderParams) {
-			required = append(required, "headers")
-		}
-	}
-	if section := buildParameterSectionSchema(ep.CookieParams); section != nil {
-		properties["cookies"] = section
-		if hasRequiredParams(ep.CookieParams) {
-			required = append(required, "cookies")
-		}
-	}
-	if body := buildRequestBodySchema(ep.RequestBody); body != nil {
-		properties["body"] = body
-		if ep.RequestBody != nil && ep.RequestBody.Required {
-			required = append(required, "body")
-		}
-	}
+func buildCallEndpointInputSchema() *jsonschema.Schema {
+	return mapToJSONSchema(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"toolName": map[string]any{"type": "string"},
+			"path":     genericArgumentSectionSchema(),
+			"query":    genericArgumentSectionSchema(),
+			"headers":  genericArgumentSectionSchema(),
+			"cookies":  genericArgumentSectionSchema(),
+			"body":     map[string]any{},
+		},
+		"required":             []string{"toolName"},
+		"additionalProperties": false,
+	})
+}
 
-	if len(required) > 0 {
-		root["required"] = required
+func genericArgumentSectionSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": true,
 	}
-	return mapToJSONSchema(root)
 }
 
 func buildParameterSectionSchema(params []spec.Param) map[string]any {
@@ -100,147 +104,6 @@ func buildParamSchema(param spec.Param) map[string]any {
 		schema["deprecated"] = true
 	}
 	return adaptInputSchemaForContentType(schema, param.ContentType)
-}
-
-func buildRequestBodySchema(body *spec.RequestBody) map[string]any {
-	if body == nil || len(body.Content) == 0 {
-		return nil
-	}
-
-	if len(body.Content) == 1 {
-		return adaptBodySchema(body.Content[0])
-	}
-
-	var enum []any
-	var variants []any
-	for _, mt := range body.Content {
-		enum = append(enum, mt.ContentType)
-		variants = append(variants, map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"content_type": map[string]any{"const": mt.ContentType},
-				"value":        adaptBodySchema(mt),
-			},
-			"required":             []string{"content_type", "value"},
-			"additionalProperties": false,
-		})
-	}
-
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"content_type": map[string]any{"type": "string", "enum": enum},
-			"value":        map[string]any{},
-		},
-		"required":             []string{"content_type", "value"},
-		"additionalProperties": false,
-		"oneOf":                variants,
-	}
-}
-
-func buildOutputSchema(ep spec.Endpoint) *jsonschema.Schema {
-	root := envelopeSchemaMap(map[string]any{}, map[string]any{
-		"status":       map[string]any{"type": "integer"},
-		"content_type": map[string]any{"type": "string"},
-		"headers":      responseHeadersSchemaMap(),
-		"body":         map[string]any{},
-		"proxy_error":  proxyErrorSchemaMap(),
-	}, nil)
-
-	var variants []any
-	for _, resp := range ep.Responses {
-		if len(resp.Content) == 0 {
-			variants = append(variants, responseEnvelopeVariant(resp.StatusCode, "", map[string]any{"type": "null"}))
-			continue
-		}
-		for _, mt := range resp.Content {
-			variants = append(variants, responseEnvelopeVariant(resp.StatusCode, mt.ContentType, adaptOutputSchemaForContentType(mt.Schema, mt.ContentType)))
-		}
-	}
-
-	variants = append(variants, map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"status":       map[string]any{"type": "integer"},
-			"content_type": map[string]any{"type": "string"},
-			"headers":      responseHeadersSchemaMap(),
-			"body":         map[string]any{},
-		},
-		"required":             []string{"status", "content_type", "headers", "body"},
-		"additionalProperties": false,
-	})
-	variants = append(variants, proxyErrorEnvelopeVariant())
-	root["oneOf"] = variants
-	return mapToJSONSchema(root)
-}
-
-func responseEnvelopeVariant(statusCode, contentType string, bodySchema map[string]any) map[string]any {
-	props := map[string]any{
-		"status":  map[string]any{"type": "integer"},
-		"headers": responseHeadersSchemaMap(),
-		"body":    bodySchema,
-	}
-	if n, ok := statusCodeAsNumber(statusCode); ok {
-		props["status"] = map[string]any{"type": "integer", "const": n}
-	}
-	if contentType != "" {
-		props["content_type"] = map[string]any{"type": "string", "const": contentType}
-	} else {
-		props["content_type"] = map[string]any{"type": "string"}
-	}
-	return envelopeSchemaMap(nil, props, []string{"status", "content_type", "headers", "body"})
-}
-
-func proxyErrorEnvelopeVariant() map[string]any {
-	return envelopeSchemaMap(nil, map[string]any{
-		"status":       map[string]any{"type": "integer", "const": 0},
-		"content_type": map[string]any{"type": "string"},
-		"headers":      responseHeadersSchemaMap(),
-		"body":         map[string]any{"type": "null"},
-		"proxy_error":  proxyErrorSchemaMap(),
-	}, []string{"status", "content_type", "headers", "body", "proxy_error"})
-}
-
-func envelopeSchemaMap(base map[string]any, properties map[string]any, required []string) map[string]any {
-	schema := map[string]any{
-		"type":                 "object",
-		"properties":           properties,
-		"additionalProperties": false,
-	}
-	if base != nil {
-		for k, v := range base {
-			schema[k] = v
-		}
-	}
-	if len(required) > 0 {
-		schema["required"] = required
-	}
-	return schema
-}
-
-func responseHeadersSchemaMap() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"additionalProperties": map[string]any{
-			"type": "array",
-			"items": map[string]any{
-				"type": "string",
-			},
-		},
-	}
-}
-
-func proxyErrorSchemaMap() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"code":    map[string]any{"type": "string"},
-			"message": map[string]any{"type": "string"},
-			"details": map[string]any{},
-		},
-		"required":             []string{"code", "message"},
-		"additionalProperties": false,
-	}
 }
 
 func adaptBodySchema(mt spec.MediaType) map[string]any {
@@ -368,23 +231,6 @@ func fallbackParamType(param spec.Param) string {
 	default:
 		return "string"
 	}
-}
-
-func hasRequiredParams(params []spec.Param) bool {
-	for _, param := range params {
-		if param.Required {
-			return true
-		}
-	}
-	return false
-}
-
-func statusCodeAsNumber(statusCode string) (int, bool) {
-	var n int
-	if err := json.Unmarshal([]byte(statusCode), &n); err != nil {
-		return 0, false
-	}
-	return n, true
 }
 
 func isBinaryMediaType(contentType string) bool {

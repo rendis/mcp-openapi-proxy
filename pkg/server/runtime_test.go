@@ -20,7 +20,11 @@ import (
 )
 
 func newHandler(ep spec.Endpoint, cfg Config) mcp.ToolHandler {
-	return buildHandler(ep, client.New(nil, 1<<20), auth.NewResolver(cfg.AuthProfile), cfg)
+	httpClient := client.New(nil, 1<<20)
+	authResolver := auth.NewResolver(cfg.AuthProfile)
+	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return callEndpoint(ctx, ep, httpClient, authResolver, cfg, req)
+	}
 }
 
 func TestBuildHandler_JSONEnvelopeAndQuerySerialization(t *testing.T) {

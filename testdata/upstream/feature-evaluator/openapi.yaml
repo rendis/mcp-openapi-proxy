@@ -1,0 +1,6083 @@
+openapi: 3.0.0
+info:
+  contact: {}
+  description: Feature flag system with rule-based evaluation, segment targeting,
+    pack-based feature bundling, and A/B experiments.
+  title: Feature Evaluator API
+  version: "1.0"
+paths:
+  /admin/api-keys:
+    get:
+      description: Returns all API keys (without secret hashes)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _domain_apikey_APIKey"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List API keys
+      tags:
+        - api-keys
+    post:
+      description: Generates a new API key and returns the plaintext secret (shown
+        only once)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                description:
+                  type: string
+                expiresAt:
+                  type: string
+                name:
+                  type: string
+                permissions:
+                  items:
+                    type: string
+                  type: array
+                type:
+                  type: string
+              type: object
+        description: API key details
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.AP\
+                  IKeyCreatedResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create an API key
+      tags:
+        - api-keys
+  "/admin/api-keys/{id}":
+    delete:
+      description: Marks an API key as revoked so it can no longer be used
+      parameters:
+        - description: API key ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Revoke an API key
+      tags:
+        - api-keys
+  "/admin/api-keys/{id}/rotate":
+    put:
+      description: Replaces the secret of an existing API key; the old key is
+        immediately invalid. Returns the new plaintext (shown only once)
+      parameters:
+        - description: API key ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.AP\
+                  IKeyCreatedResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Rotate an API key
+      tags:
+        - api-keys
+  /admin/audit/errors:
+    get:
+      description: Returns a paginated list of evaluation errors, optionally filtered
+        by feature, tenant, error type, and date range
+      parameters:
+        - description: Filter by feature key
+          in: query
+          name: featureKey
+          schema:
+            type: string
+        - description: Filter by tenant ID
+          in: query
+          name: tenantId
+          schema:
+            type: string
+        - description: Filter by error type
+          in: query
+          name: errorType
+          schema:
+            type: string
+        - description: Start date (RFC3339)
+          in: query
+          name: from
+          schema:
+            type: string
+        - description: End date (RFC3339)
+          in: query
+          name: to
+          schema:
+            type: string
+        - description: Page number (default 1)
+          in: query
+          name: page
+          schema:
+            type: integer
+        - description: Page size (default 20, max 100)
+          in: query
+          name: pageSize
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Li\
+                  stResponse-github_com_rendis_feature-evaluator_internal_dto_A\
+                  uditErrorResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List evaluation errors
+      tags:
+        - audit
+  /admin/auth-profiles:
+    get:
+      description: Returns all auth profiles in the current workspace
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _dto_AuthProfileResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List auth profiles
+      tags:
+        - auth-profiles
+    post:
+      description: Creates a new auth profile for incoming request authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Cr\
+                eateAuthProfileRequest"
+        description: Auth profile definition
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Au\
+                  thProfileResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create an auth profile
+      tags:
+        - auth-profiles
+  "/admin/auth-profiles/{key}":
+    delete:
+      description: Removes an auth profile by key
+      parameters:
+        - description: Auth profile key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Delete an auth profile
+      tags:
+        - auth-profiles
+    get:
+      description: Returns a single auth profile by key
+      parameters:
+        - description: Auth profile key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Au\
+                  thProfileResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get an auth profile
+      tags:
+        - auth-profiles
+    put:
+      description: Updates an existing auth profile by key
+      parameters:
+        - description: Auth profile key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Up\
+                dateAuthProfileRequest"
+        description: Updated auth profile definition
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Au\
+                  thProfileResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Update an auth profile
+      tags:
+        - auth-profiles
+  /admin/auth-profiles/test:
+    post:
+      description: Validates a draft auth profile against a simulated eval request
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Te\
+                stAuthProfileRequest"
+        description: Draft auth profile and test request data
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Au\
+                  thProfileTestResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Test an auth profile
+      tags:
+        - auth-profiles
+  /admin/changelog:
+    get:
+      description: Returns a paginated, filtered list of changelog entries
+      parameters:
+        - description: Filter by entity type
+          in: query
+          name: entityType
+          schema:
+            type: string
+        - description: Filter by entity key
+          in: query
+          name: entityKey
+          schema:
+            type: string
+        - description: Filter by actor
+          in: query
+          name: actor
+          schema:
+            type: string
+        - description: Filter by action
+          in: query
+          name: action
+          schema:
+            type: string
+        - description: Start date (RFC3339)
+          in: query
+          name: from
+          schema:
+            type: string
+        - description: End date (RFC3339)
+          in: query
+          name: to
+          schema:
+            type: string
+        - description: Page number (default 1)
+          in: query
+          name: page
+          schema:
+            type: integer
+        - description: Page size (default 20)
+          in: query
+          name: pageSize
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Li\
+                  stResponse-github_com_rendis_feature-evaluator_internal_dto_C\
+                  hangeEntryResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List changelog entries
+      tags:
+        - changelog
+  "/admin/changelog/{entityType}/{entityKey}":
+    get:
+      description: Returns changelog entries for a specific entity type and key
+      parameters:
+        - description: Entity type
+          in: path
+          name: entityType
+          required: true
+          schema:
+            type: string
+        - description: Entity key
+          in: path
+          name: entityKey
+          required: true
+          schema:
+            type: string
+        - description: Filter by actor
+          in: query
+          name: actor
+          schema:
+            type: string
+        - description: Filter by action
+          in: query
+          name: action
+          schema:
+            type: string
+        - description: Start date (RFC3339)
+          in: query
+          name: from
+          schema:
+            type: string
+        - description: End date (RFC3339)
+          in: query
+          name: to
+          schema:
+            type: string
+        - description: Page number (default 1)
+          in: query
+          name: page
+          schema:
+            type: integer
+        - description: Page size (default 20)
+          in: query
+          name: pageSize
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Li\
+                  stResponse-github_com_rendis_feature-evaluator_internal_dto_C\
+                  hangeEntryResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List changelog entries for an entity
+      tags:
+        - changelog
+  /admin/dashboard/activity:
+    get:
+      description: Returns the 10 most recently updated features for the activity feed
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                    shboardActivityItem"
+                type: array
+      security:
+        - BearerAuth: []
+      summary: Dashboard activity
+      tags:
+        - dashboard
+  /admin/dashboard/error-summary:
+    get:
+      description: Returns aggregated evaluation error counts for the dashboard
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  shboardErrorSummaryResponse"
+      security:
+        - BearerAuth: []
+      summary: Dashboard error summary
+      tags:
+        - dashboard
+  /admin/dashboard/metrics/cache:
+    get:
+      description: Returns cache hit/miss counts and hit ratio over the date range
+      parameters:
+        - description: Number of days (1-30, default 7)
+          in: query
+          name: days
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  tricsCacheResponse"
+      security:
+        - BearerAuth: []
+      summary: Cache statistics
+      tags:
+        - metrics
+  /admin/dashboard/metrics/environments:
+    get:
+      description: Returns evaluation counts broken down by environment over the date range
+      parameters:
+        - description: Number of days (1-30, default 7)
+          in: query
+          name: days
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  format: int64
+                  type: integer
+                type: object
+      security:
+        - BearerAuth: []
+      summary: Environment breakdown
+      tags:
+        - metrics
+  /admin/dashboard/metrics/external:
+    get:
+      description: Returns external call latency percentiles and circuit breaker event
+        counts over the date range
+      parameters:
+        - description: Number of days (1-30, default 7)
+          in: query
+          name: days
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  tricsExternalResponse"
+      security:
+        - BearerAuth: []
+      summary: External call statistics
+      tags:
+        - metrics
+  /admin/dashboard/metrics/features:
+    get:
+      description: Returns the top features ranked by evaluation count over the date range
+      parameters:
+        - description: Number of days (1-30, default 7)
+          in: query
+          name: days
+          schema:
+            type: integer
+        - description: Max results to return (default 10)
+          in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                    tricsFeatureEntry"
+                type: array
+      security:
+        - BearerAuth: []
+      summary: Top features by evaluations
+      tags:
+        - metrics
+  /admin/dashboard/metrics/overview:
+    get:
+      description: Returns today's evaluation totals and a multi-day trend
+      parameters:
+        - description: Number of days for the trend (1-30, default 7)
+          in: query
+          name: days
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  tricsOverviewResponse"
+      security:
+        - BearerAuth: []
+      summary: Metrics overview
+      tags:
+        - metrics
+  /admin/dashboard/metrics/reasons:
+    get:
+      description: Returns evaluation reason counts aggregated over the date range
+      parameters:
+        - description: Number of days (1-30, default 7)
+          in: query
+          name: days
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  format: int64
+                  type: integer
+                type: object
+      security:
+        - BearerAuth: []
+      summary: Evaluation reason breakdown
+      tags:
+        - metrics
+  /admin/dashboard/metrics/tenants:
+    get:
+      description: Returns the top tenants ranked by evaluation count over the date range
+      parameters:
+        - description: Number of days (1-30, default 7)
+          in: query
+          name: days
+          schema:
+            type: integer
+        - description: Max results to return (default 10)
+          in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                    tricsTenantEntry"
+                type: array
+      security:
+        - BearerAuth: []
+      summary: Top tenants by evaluations
+      tags:
+        - metrics
+  /admin/dashboard/operations:
+    get:
+      description: Returns the current system status, dependency health, and runtime
+        metrics snapshot
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  shboardOperationsResponse"
+      security:
+        - BearerAuth: []
+      summary: Dashboard operations
+      tags:
+        - dashboard
+  /admin/dashboard/stats:
+    get:
+      description: Returns aggregate counts of features, active features, segments,
+        and segment members
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  shboardStatsResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Dashboard stats
+      tags:
+        - dashboard
+  /admin/environments:
+    get:
+      description: Returns the static list of valid environments
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  type: string
+                type: array
+      security:
+        - BearerAuth: []
+      summary: List environments
+      tags:
+        - features
+  /admin/experiments:
+    get:
+      description: Returns all experiments in the current workspace
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _dto_ExperimentResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List experiments
+      tags:
+        - experiments
+    post:
+      description: Creates a new A/B experiment for a feature
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Cr\
+                eateExperimentRequest"
+        description: Experiment creation payload
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+                  perimentResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create experiment
+      tags:
+        - experiments
+  "/admin/experiments/{id}":
+    get:
+      description: Returns a single experiment by ID
+      parameters:
+        - description: Experiment ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+                  perimentResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get experiment
+      tags:
+        - experiments
+    put:
+      description: Updates a draft experiment by ID
+      parameters:
+        - description: Experiment ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Up\
+                dateExperimentRequest"
+        description: Experiment update payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+                  perimentResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Update experiment
+      tags:
+        - experiments
+  "/admin/experiments/{id}/complete":
+    post:
+      description: Completes a running or paused experiment
+      parameters:
+        - description: Experiment ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Complete experiment
+      tags:
+        - experiments
+  "/admin/experiments/{id}/declare-winner":
+    post:
+      description: Declares a winning variant for a completed experiment
+      parameters:
+        - description: Experiment ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.De\
+                clareWinnerRequest"
+        description: Winner declaration payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.De\
+                  clareWinnerResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Declare winner
+      tags:
+        - experiments
+  "/admin/experiments/{id}/pause":
+    post:
+      description: Pauses a running experiment
+      parameters:
+        - description: Experiment ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Pause experiment
+      tags:
+        - experiments
+  "/admin/experiments/{id}/results":
+    get:
+      description: Returns computed results and statistics for an experiment
+      parameters:
+        - description: Experiment ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+                  _experiment.Results"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get experiment results
+      tags:
+        - experiments
+  "/admin/experiments/{id}/start":
+    post:
+      description: Starts a draft or paused experiment
+      parameters:
+        - description: Experiment ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Start experiment
+      tags:
+        - experiments
+  /admin/expression/schema:
+    get:
+      description: Returns the available fields, functions, and operators for building
+        expressions
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+                  pressionSchemaResponse"
+      security:
+        - BearerAuth: []
+      summary: Get expression schema
+      tags:
+        - expressions
+  /admin/expression/test:
+    post:
+      description: Tests an expression against a provided context and returns the
+        evaluation result
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Te\
+                stExpressionRequest"
+        description: Expression and context to test
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Te\
+                  stExpressionResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Test an expression
+      tags:
+        - expressions
+  /admin/expression/validate:
+    post:
+      description: Validates an expression string without evaluating it
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Va\
+                lidateExpressionRequest"
+        description: Expression to validate
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Va\
+                  lidateExpressionResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Validate an expression
+      tags:
+        - expressions
+  /admin/external-apis:
+    get:
+      description: Returns all external API definitions in the current workspace
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _dto_ExternalAPIResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List external APIs
+      tags:
+        - external-apis
+    post:
+      description: Stores a new external API definition
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Cr\
+                eateExternalAPIRequest"
+        description: External API definition
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+                  ternalAPIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create an external API
+      tags:
+        - external-apis
+  "/admin/external-apis/{key}":
+    delete:
+      description: Removes an external API definition by key
+      parameters:
+        - description: External API key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Delete an external API
+      tags:
+        - external-apis
+    get:
+      description: Returns a single external API definition by key
+      parameters:
+        - description: External API key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+                  ternalAPIResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get an external API
+      tags:
+        - external-apis
+    put:
+      description: Updates an existing external API definition by key
+      parameters:
+        - description: External API key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Up\
+                dateExternalAPIRequest"
+        description: Updated external API definition
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+                  ternalAPIResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Update an external API
+      tags:
+        - external-apis
+  /admin/external-apis/expression-profile:
+    get:
+      description: Returns the shared semantic catalog used by the external API
+        response expression editor
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+                  ternalAPIExpressionProfileResponse"
+      security:
+        - BearerAuth: []
+      summary: Get expression profile
+      tags:
+        - external-apis
+  /admin/external-apis/expression/validate:
+    post:
+      description: Validates a draft external API response expression without
+        persisting any changes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Va\
+                lidateExternalAPIExpressionRequest"
+        description: Expression to validate
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Va\
+                  lidateExpressionResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Validate an expression
+      tags:
+        - external-apis
+  /admin/external-apis/test:
+    post:
+      description: Executes an external API draft with sample parameter values and
+        returns the result
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Te\
+                stExternalAPIRequest"
+        description: Draft external API and test parameter values
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+                  ternalAPITestResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Test an external API
+      tags:
+        - external-apis
+  /admin/features:
+    get:
+      description: Returns a paginated list of features with optional filters
+      parameters:
+        - description: Filter by name or key
+          in: query
+          name: search
+          schema:
+            type: string
+        - description: Sort field
+          in: query
+          name: sort
+          schema:
+            type: string
+        - description: Sort order
+          in: query
+          name: order
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: desc
+        - description: Response view mode
+          in: query
+          name: view
+          schema:
+            type: string
+            enum:
+              - summary
+        - description: Page number
+          in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - description: Items per page
+          in: query
+          name: pageSize
+          schema:
+            type: integer
+            default: 20
+        - description: Filter by enabled status
+          in: query
+          name: enabled
+          schema:
+            type: boolean
+        - description: Filter by value type
+          in: query
+          name: valueType
+          schema:
+            type: string
+        - description: Filter by tag keys
+          in: query
+          name: tags
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+        - description: Filter by environment
+          in: query
+          name: environment
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Li\
+                  stResponse-github_com_rendis_feature-evaluator_internal_dto_F\
+                  eatureSummaryResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List features
+      tags:
+        - features
+    post:
+      description: Creates a new feature flag with the given configuration
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Cr\
+                eateFeatureRequest"
+        description: Feature creation payload
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fe\
+                  atureDetailResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create a feature
+      tags:
+        - features
+  "/admin/features/{key}":
+    delete:
+      description: Permanently removes a feature flag and all its rules
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Delete a feature
+      tags:
+        - features
+    get:
+      description: Returns a single feature with its rules, tags, packs, and tier references
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fe\
+                  atureDetailResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get feature detail
+      tags:
+        - features
+    put:
+      description: Updates an existing feature flag (partial update supported)
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Up\
+                dateFeatureRequest"
+        description: Feature update payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fe\
+                  atureDetailResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Update a feature
+      tags:
+        - features
+  "/admin/features/{key}/expression-schema":
+    get:
+      description: Returns the expression inputs available for a specific feature
+        based on its input contract
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fe\
+                  atureExpressionSchemaResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get feature expression schema
+      tags:
+        - expressions
+  "/admin/features/{key}/expression/test":
+    post:
+      description: Tests an expression using the feature-specific input contract with
+        a simulated scenario
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fe\
+                atureExpressionTestRequest"
+        description: Expression, scenario, and bindings to test
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fe\
+                  atureExpressionTestResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Test expression with feature context
+      tags:
+        - expressions
+  "/admin/features/{key}/rules":
+    get:
+      description: Returns all rules for a feature, sorted by priority
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _dto_RuleResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List rules for a feature
+      tags:
+        - rules
+    post:
+      description: Adds a new rule to a feature with expression, value, and optional
+        rollout/bindings
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Cr\
+                eateRuleRequest"
+        description: Rule creation payload
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ru\
+                  leResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create a rule
+      tags:
+        - rules
+  "/admin/features/{key}/rules/{ruleId}":
+    delete:
+      description: Removes a rule from a feature
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+        - description: Rule ID
+          in: path
+          name: ruleId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Delete a rule
+      tags:
+        - rules
+    put:
+      description: Updates an existing rule within a feature
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+        - description: Rule ID
+          in: path
+          name: ruleId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Up\
+                dateRuleRequest"
+        description: Rule update payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ru\
+                  leResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Update a rule
+      tags:
+        - rules
+  "/admin/features/{key}/rules/reorder":
+    put:
+      description: Sets the priority order of rules within a feature
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Re\
+                orderRulesRequest"
+        description: Ordered list of rule IDs
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Reorder rules
+      tags:
+        - rules
+  "/admin/features/{key}/schedules":
+    get:
+      description: Returns all scheduled changes for a feature
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _domain_schedule_ScheduledChange"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List scheduled changes
+      tags:
+        - schedules
+    post:
+      description: Creates a new scheduled change for a feature to be applied at a
+        future time
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Cr\
+                eateScheduleRequest"
+        description: Scheduled change payload
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+                  _schedule.ScheduledChange"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create a scheduled change
+      tags:
+        - schedules
+  "/admin/features/{key}/toggle":
+    patch:
+      description: Enables or disables a feature flag
+      parameters:
+        - description: Feature key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.To\
+                ggleFeatureRequest"
+        description: Toggle payload with enabled flag
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.To\
+                  ggleMessageResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Toggle a feature
+      tags:
+        - features
+  /admin/members:
+    get:
+      description: Returns all team members in the current workspace
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _dto_MemberResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List members
+      tags:
+        - members
+    post:
+      description: Registers a new team member
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Cr\
+                eateMemberRequest"
+        description: Member creation payload
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  mberResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create member
+      tags:
+        - members
+  "/admin/members/{id}":
+    delete:
+      description: Removes a team member
+      parameters:
+        - description: Member ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Delete member
+      tags:
+        - members
+  "/admin/members/{id}/role":
+    put:
+      description: Changes a member's role
+      parameters:
+        - description: Member ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Up\
+                dateRoleRequest"
+        description: Role update payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Update member role
+      tags:
+        - members
+  "/admin/members/{id}/transfer-ownership":
+    post:
+      description: Transfers the owner role from one member to another
+      parameters:
+        - description: Current owner member ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Tr\
+                ansferOwnershipRequest"
+        description: Transfer payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Transfer ownership
+      tags:
+        - members
+  /admin/members/me:
+    get:
+      description: Returns the authenticated user's member information
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  mberResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get current member
+      tags:
+        - members
+  /admin/packs:
+    get:
+      description: Returns all feature packs in the current workspace
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _dto_PackResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List packs
+      tags:
+        - packs
+    post:
+      description: Creates a new feature pack
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Cr\
+                eatePackRequest"
+        description: Pack creation payload
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+                  ckResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create pack
+      tags:
+        - packs
+  "/admin/packs/{key}":
+    delete:
+      description: Deletes a pack by key
+      parameters:
+        - description: Pack key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Delete pack
+      tags:
+        - packs
+    get:
+      description: Returns a single pack by key
+      parameters:
+        - description: Pack key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+                  ckResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get pack
+      tags:
+        - packs
+    put:
+      description: Updates an existing pack by key
+      parameters:
+        - description: Pack key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Up\
+                datePackRequest"
+        description: Pack update payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+                  ckResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Update pack
+      tags:
+        - packs
+  "/admin/packs/{key}/activate":
+    delete:
+      description: Removes a pack activation for a target
+      parameters:
+        - description: Pack key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.De\
+                activatePackRequest"
+        description: Deactivation payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Deactivate pack
+      tags:
+        - packs
+    post:
+      description: Creates a pack activation for a target (tenant, campus, or program)
+      parameters:
+        - description: Pack key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ac\
+                tivatePackRequest"
+        description: Activation payload
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ac\
+                  tivationResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Activate pack
+      tags:
+        - packs
+  "/admin/packs/{key}/activations":
+    get:
+      description: Returns all activations for a pack by key
+      parameters:
+        - description: Pack key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _dto_ActivationResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List pack activations
+      tags:
+        - packs
+  "/admin/packs/{key}/toggle":
+    patch:
+      description: Enables or disables a pack by key
+      parameters:
+        - description: Pack key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.To\
+                ggleFeatureRequest"
+        description: Toggle payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.To\
+                  ggleMessageResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Toggle pack
+      tags:
+        - packs
+  /admin/packs/by-target:
+    get:
+      description: Returns all pack activations for a given target type and ID
+      parameters:
+        - description: Target type (tenant, campus, program)
+          in: query
+          name: type
+          required: true
+          schema:
+            type: string
+        - description: Target ID
+          in: query
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _dto_ActivationResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get activations by target
+      tags:
+        - packs
+  "/admin/schedules/{id}":
+    delete:
+      description: Cancels a pending scheduled change by its ID
+      parameters:
+        - description: Schedule ID
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Cancel a scheduled change
+      tags:
+        - schedules
+  /admin/segments:
+    get:
+      description: Returns a paginated list of segments
+      parameters:
+        - description: Search filter
+          in: query
+          name: search
+          schema:
+            type: string
+        - description: Page number
+          in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - description: Page size
+          in: query
+          name: pageSize
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Li\
+                  stResponse-github_com_rendis_feature-evaluator_internal_dto_S\
+                  egmentResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List segments
+      tags:
+        - segments
+    post:
+      description: Creates a new segment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Cr\
+                eateSegmentRequest"
+        description: Segment creation payload
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Se\
+                  gmentResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create segment
+      tags:
+        - segments
+  "/admin/segments/{key}":
+    delete:
+      description: Deletes a segment and all its records
+      parameters:
+        - description: Segment key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Delete segment
+      tags:
+        - segments
+    get:
+      description: Returns a single segment by key
+      parameters:
+        - description: Segment key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Se\
+                  gmentResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get segment
+      tags:
+        - segments
+    put:
+      description: Updates an existing segment by key
+      parameters:
+        - description: Segment key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Up\
+                dateSegmentRequest"
+        description: Segment update payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Se\
+                  gmentResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Update segment
+      tags:
+        - segments
+  "/admin/segments/{key}/data/import":
+    post:
+      description: Imports a full dataset version into a segment (replace mode)
+      parameters:
+        - description: Segment key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Im\
+                portSegmentDataRequest"
+        description: Import payload
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Im\
+                  portResultResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Import segment data
+      tags:
+        - segments
+  "/admin/segments/{key}/records":
+    get:
+      description: Returns a paginated list of records for a segment
+      parameters:
+        - description: Segment key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+        - description: Search query
+          in: query
+          name: q
+          schema:
+            type: string
+        - description: Page number
+          in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - description: Page size
+          in: query
+          name: pageSize
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Li\
+                  stResponse-github_com_rendis_feature-evaluator_internal_dto_S\
+                  egmentRecordResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List segment records
+      tags:
+        - segments
+  "/admin/segments/{key}/schema":
+    get:
+      description: Returns the stored schema metadata for a segment
+      parameters:
+        - description: Segment key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Se\
+                  gmentSchemaResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get segment schema
+      tags:
+        - segments
+  /admin/tags:
+    get:
+      description: Returns all tags, optionally filtered by search
+      parameters:
+        - description: Filter by name
+          in: query
+          name: search
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _dto_TagDetailResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List tags
+      tags:
+        - tags
+    post:
+      description: Creates a new tag with the given name and color
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                color:
+                  type: string
+                name:
+                  type: string
+              type: object
+        description: Tag name and color
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ta\
+                  gDetailResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create a tag
+      tags:
+        - tags
+  "/admin/tags/{key}":
+    delete:
+      description: Removes a tag by key
+      parameters:
+        - description: Tag key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Delete a tag
+      tags:
+        - tags
+    put:
+      description: Updates a tag's name and color by key
+      parameters:
+        - description: Tag key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                color:
+                  type: string
+                name:
+                  type: string
+              type: object
+        description: Updated tag name and color
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ta\
+                  gDetailResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Update a tag
+      tags:
+        - tags
+  /admin/workspaces:
+    get:
+      description: Returns all workspaces, optionally including archived ones
+      parameters:
+        - description: Include archived workspaces (default false)
+          in: query
+          name: includeArchived
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Da\
+                  taResponse-array_github_com_rendis_feature-evaluator_internal\
+                  _domain_workspace_Workspace"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: List workspaces
+      tags:
+        - workspaces
+    post:
+      description: Creates a new workspace; if this is the first workspace the caller
+        is added as owner
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                description:
+                  type: string
+                key:
+                  type: string
+                name:
+                  type: string
+              type: object
+        description: Workspace definition
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+                  _workspace.Workspace"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Create a workspace
+      tags:
+        - workspaces
+  "/admin/workspaces/{key}":
+    delete:
+      description: Archives a workspace for backwards compatibility (same as Archive)
+      parameters:
+        - description: Workspace key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Delete a workspace
+      tags:
+        - workspaces
+    get:
+      description: Returns a single workspace by key
+      parameters:
+        - description: Workspace key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+                  _workspace.Workspace"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get a workspace
+      tags:
+        - workspaces
+    put:
+      description: Updates a workspace's name and description by key
+      parameters:
+        - description: Workspace key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                description:
+                  type: string
+                name:
+                  type: string
+              type: object
+        description: Updated workspace fields
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+                  _workspace.Workspace"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Update a workspace
+      tags:
+        - workspaces
+  "/admin/workspaces/{key}/archive":
+    post:
+      description: Archives a workspace by key, making it inactive
+      parameters:
+        - description: Workspace key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Archive a workspace
+      tags:
+        - workspaces
+  "/admin/workspaces/{key}/restore":
+    post:
+      description: Restores an archived workspace by key
+      parameters:
+        - description: Workspace key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+      summary: Restore a workspace
+      tags:
+        - workspaces
+  /eval:
+    post:
+      description: Evaluates a feature flag for the given context and returns the
+        result value
+      parameters:
+        - description: Environment override (takes precedence over body)
+          in: header
+          name: X-Environment
+          schema:
+            type: string
+        - description: Tenant ID fallback (used if not in context)
+          in: header
+          name: X-Tenant-Id
+          schema:
+            type: string
+        - description: Campus ID fallback (used if not in context)
+          in: header
+          name: X-Campus-Id
+          schema:
+            type: string
+        - description: Program ID fallback (used if not in context)
+          in: header
+          name: X-Program-Id
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+                _evaluation.Request"
+        description: Evaluation request with feature key and context
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+                  _evaluation.Result"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Evaluate a single feature
+      tags:
+        - evaluation
+  /eval/active:
+    post:
+      description: Evaluates all enabled feature flags and returns only the active ones
+      parameters:
+        - description: Environment override (takes precedence over body)
+          in: header
+          name: X-Environment
+          schema:
+            type: string
+        - description: Tenant ID fallback (used if not in context)
+          in: header
+          name: X-Tenant-Id
+          schema:
+            type: string
+        - description: Campus ID fallback (used if not in context)
+          in: header
+          name: X-Campus-Id
+          schema:
+            type: string
+        - description: Program ID fallback (used if not in context)
+          in: header
+          name: X-Program-Id
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+                _evaluation.AllRequest"
+        description: Context for evaluating all features
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+                  _evaluation.AllResult"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Evaluate all enabled features
+      tags:
+        - evaluation
+  /eval/bulk:
+    post:
+      description: Evaluates multiple feature flags in a single request and returns
+        all results
+      parameters:
+        - description: Environment override (takes precedence over body)
+          in: header
+          name: X-Environment
+          schema:
+            type: string
+        - description: Tenant ID fallback (used if not in context)
+          in: header
+          name: X-Tenant-Id
+          schema:
+            type: string
+        - description: Campus ID fallback (used if not in context)
+          in: header
+          name: X-Campus-Id
+          schema:
+            type: string
+        - description: Program ID fallback (used if not in context)
+          in: header
+          name: X-Program-Id
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+                _evaluation.BulkRequest"
+        description: Bulk evaluation request with feature list and shared context
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+                  _evaluation.BulkResult"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Evaluate multiple features
+      tags:
+        - evaluation
+  /eval/conversions:
+    post:
+      description: Records a conversion event for an experiment metric
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Re\
+                cordConversionRequest"
+        description: Conversion event payload
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+                  ssageResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Er\
+                  rorResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Record conversion
+      tags:
+        - experiments
+  /healthz:
+    get:
+      description: Returns 200 if the server process is running
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.He\
+                  althResponse"
+      summary: Liveness probe
+      tags:
+        - health
+  /ofrep/v1/evaluate/flags:
+    post:
+      description: "OpenFeature Remote Evaluation Protocol endpoint for bulk flag
+        evaluation. Returns all enabled flags with ETag support. NOTE: This
+        endpoint is served under /ofrep/v1, not under the /features BasePath."
+      parameters:
+        - description: ETag for conditional request (returns 304 if unchanged)
+          in: header
+          name: If-None-Match
+          schema:
+            type: string
+        - description: Environment override
+          in: header
+          name: X-Environment
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.OF\
+                REPBulkRequest"
+        description: OFREP bulk evaluation request with context
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.OF\
+                  REPBulkResponse"
+        "304":
+          description: Not Modified
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.OF\
+                  REPBulkErrorResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Evaluate all flags in bulk (OFREP)
+      tags:
+        - ofrep
+  "/ofrep/v1/evaluate/flags/{key}":
+    post:
+      description: "OpenFeature Remote Evaluation Protocol endpoint for evaluating a
+        single flag. NOTE: This endpoint is served under /ofrep/v1, not under
+        the /features BasePath."
+      parameters:
+        - description: Feature flag key
+          in: path
+          name: key
+          required: true
+          schema:
+            type: string
+        - description: Environment override
+          in: header
+          name: X-Environment
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.OF\
+                REPEvalRequest"
+        description: OFREP evaluation request with context
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.OF\
+                  REPEvalResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.OF\
+                  REPErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.OF\
+                  REPErrorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.OF\
+                  REPErrorResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.OF\
+                  REPErrorResponse"
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      summary: Evaluate a single flag (OFREP)
+      tags:
+        - ofrep
+  /readyz:
+    get:
+      description: Checks PostgreSQL and Redis connectivity and returns component
+        health status
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.He\
+                  althResponse"
+        "503":
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.He\
+                  althResponse"
+      summary: Readiness probe
+      tags:
+        - health
+servers:
+  - url: /features
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      description: API key for evaluation or admin access
+      in: header
+      name: X-Api-Key
+      type: apiKey
+    BearerAuth:
+      description: Type "Bearer" followed by a space and JWT token
+      in: header
+      name: Authorization
+      type: apiKey
+    WorkspaceHeader:
+      description: Workspace key for multi-tenant isolation
+      in: header
+      name: X-Workspace
+      type: apiKey
+  schemas:
+    github_com_rendis_feature-evaluator_internal_domain_apikey.APIKey:
+      properties:
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        createdByPermissions:
+          items:
+            type: string
+          type: array
+        description:
+          type: string
+        expiresAt:
+          type: string
+        id:
+          type: string
+        lastUsedAt:
+          type: string
+        name:
+          type: string
+        permissions:
+          items:
+            type: string
+          type: array
+        prefix:
+          type: string
+        revoked:
+          type: boolean
+        type:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _apikey.KeyType"
+        workspaceKey:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_apikey.KeyType:
+      enum:
+        - admin
+      type: string
+      x-enum-varnames:
+        - KeyTypeAdmin
+    github_com_rendis_feature-evaluator_internal_domain_authprofile.Type:
+      enum:
+        - api_key
+        - oidc_standard
+        - custom
+      type: string
+      x-enum-varnames:
+        - TypeAPIKey
+        - TypeOIDCStandard
+        - TypeCustom
+    github_com_rendis_feature-evaluator_internal_domain_evaluation.AllRequest:
+      properties:
+        context:
+          additionalProperties: {}
+          type: object
+        environment:
+          type: string
+        tags:
+          items:
+            type: string
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_evaluation.AllResult:
+      properties:
+        environment:
+          type: string
+        evaluatedAt:
+          type: string
+        features:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _evaluation.Result"
+          type: array
+        totalActive:
+          type: integer
+        totalEvaluated:
+          type: integer
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_evaluation.BulkRequest:
+      properties:
+        features:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _evaluation.Request"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_evaluation.BulkResult:
+      properties:
+        results:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _evaluation.Result"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_evaluation.EvalError:
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_evaluation.ExperimentInfo:
+      properties:
+        experimentId:
+          type: string
+        variantKey:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_evaluation.MatchedRule:
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_evaluation.Reason:
+      enum:
+        - matched_rule
+        - default_value
+        - feature_disabled
+        - not_yet_active
+        - expired
+        - environment_mismatch
+        - unauthorized
+        - experiment
+        - rollout_excluded
+        - error
+        - trial_active
+      type: string
+      x-enum-varnames:
+        - ReasonMatchedRule
+        - ReasonDefaultValue
+        - ReasonFeatureDisabled
+        - ReasonNotYetActive
+        - ReasonExpired
+        - ReasonEnvironmentMismatch
+        - ReasonUnauthorized
+        - ReasonExperiment
+        - ReasonRolloutExcluded
+        - ReasonError
+        - ReasonTrialActive
+    github_com_rendis_feature-evaluator_internal_domain_evaluation.Request:
+      properties:
+        context:
+          additionalProperties: {}
+          type: object
+        environment:
+          type: string
+        featureKey:
+          type: string
+        user:
+          additionalProperties: {}
+          description: 'Deprecated: Use Context with a "user" namespace instead.'
+          type: object
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_evaluation.Result:
+      properties:
+        environment:
+          type: string
+        error:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _evaluation.EvalError"
+        evaluatedAt:
+          type: string
+        experiment:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _evaluation.ExperimentInfo"
+        featureKey:
+          type: string
+        inTrial:
+          type: boolean
+        matchedRule:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _evaluation.MatchedRule"
+        metadata:
+          additionalProperties: {}
+          type: object
+        packGrant:
+          type: string
+        reason:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _evaluation.Reason"
+        segments:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _evaluation.SegmentResult"
+          type: array
+        tierKeys:
+          items:
+            type: string
+          type: array
+        trialEndsAt:
+          type: string
+        value: {}
+        valueType:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_evaluation.SegmentResult:
+      properties:
+        key:
+          type: string
+        member:
+          type: boolean
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_experiment.Results:
+      properties:
+        experimentId:
+          type: string
+        isSignificant:
+          type: boolean
+        totalConversions:
+          type: integer
+        totalExposures:
+          type: integer
+        variants:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _experiment.VariantStats"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_experiment.VariantStats:
+      properties:
+        confidenceHigh:
+          type: number
+        confidenceLow:
+          type: number
+        conversionRate:
+          type: number
+        conversions:
+          type: integer
+        exposures:
+          type: integer
+        variantKey:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.BodyValidation:
+      properties:
+        expression:
+          type: string
+        sampleResponseText:
+          type: string
+        schema:
+          additionalProperties: {}
+          type: object
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.ExpressionVariable:
+      properties:
+        name:
+          type: string
+        required:
+          type: boolean
+        type:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.ParamType"
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.HTTPValidation:
+      properties:
+        codes:
+          items:
+            type: integer
+          type: array
+        mode:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.HTTPValidationMode"
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.HTTPValidationMode:
+      enum:
+        - any_2xx
+        - status_codes
+      type: string
+      x-enum-varnames:
+        - HTTPValidationModeAny2xx
+        - HTTPValidationModeStatusCode
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.HeaderTemplate:
+      properties:
+        keyTemplate:
+          type: string
+        valueTemplate:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.Location:
+      enum:
+        - url
+        - header
+        - body
+      type: string
+      x-enum-varnames:
+        - LocationURL
+        - LocationHeader
+        - LocationBody
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.Param:
+      properties:
+        locations:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _externalapi.Location"
+          type: array
+        name:
+          type: string
+        required:
+          type: boolean
+        type:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.ParamType"
+        urlKind:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.URLKind"
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.ParamType:
+      enum:
+        - any
+        - string
+        - number
+        - bool
+      type: string
+      x-enum-varnames:
+        - ParamTypeAny
+        - ParamTypeString
+        - ParamTypeNumber
+        - ParamTypeBool
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.RequestConfig:
+      properties:
+        bodyTemplate: {}
+        headers:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _externalapi.HeaderTemplate"
+          type: array
+        method:
+          type: string
+        urlTemplate:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.ResponseValidation:
+      properties:
+        body:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.BodyValidation"
+        http:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.HTTPValidation"
+        mode:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.ValidationMode"
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.URLKind:
+      enum:
+        - domain
+        - path
+        - query
+      type: string
+      x-enum-varnames:
+        - URLKindDomain
+        - URLKindPath
+        - URLKindQuery
+    github_com_rendis_feature-evaluator_internal_domain_externalapi.ValidationMode:
+      enum:
+        - httpCode
+        - responseBody
+        - both
+      type: string
+      x-enum-varnames:
+        - ValidationModeHTTPCode
+        - ValidationModeResponseBody
+        - ValidationModeBoth
+    github_com_rendis_feature-evaluator_internal_domain_schedule.ChangeType:
+      enum:
+        - toggle
+        - update
+        - default_value
+        - environment
+      type: string
+      x-enum-varnames:
+        - ChangeToggle
+        - ChangeUpdate
+        - ChangeDefaultVal
+        - ChangeEnvironment
+    github_com_rendis_feature-evaluator_internal_domain_schedule.ScheduledChange:
+      properties:
+        changeType:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _schedule.ChangeType"
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        error:
+          type: string
+        executedAt:
+          type: string
+        featureKey:
+          type: string
+        id:
+          type: string
+        payload:
+          additionalProperties: {}
+          type: object
+        scheduledAt:
+          type: string
+        status:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _schedule.Status"
+        workspaceKey:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_domain_schedule.Status:
+      enum:
+        - pending
+        - executing
+        - completed
+        - failed
+        - cancelled
+      type: string
+      x-enum-varnames:
+        - StatusPending
+        - StatusExecuting
+        - StatusCompleted
+        - StatusFailed
+        - StatusCancelled
+    github_com_rendis_feature-evaluator_internal_domain_workspace.Workspace:
+      properties:
+        archivedAt:
+          type: string
+        archivedBy:
+          type: string
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        description:
+          type: string
+        id:
+          type: string
+        key:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        updatedAt:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.APIKeyCreatedResponse:
+      properties:
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        description:
+          type: string
+        expiresAt:
+          type: string
+        id:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+        permissions:
+          items:
+            type: string
+          type: array
+        prefix:
+          type: string
+        type:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ActivatePackRequest:
+      properties:
+        expiresAt:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        targetId:
+          type: string
+        targetType:
+          type: string
+      required:
+        - targetId
+        - targetType
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ActivationResponse:
+      properties:
+        activatedAt:
+          type: string
+        activatedBy:
+          type: string
+        expiresAt:
+          type: string
+        id:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        packKey:
+          type: string
+        targetId:
+          type: string
+        targetType:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.AuditErrorResponse:
+      properties:
+        campusId:
+          type: string
+        createdAt:
+          type: string
+        errorType:
+          type: string
+        featureKey:
+          type: string
+        id:
+          type: string
+        message:
+          type: string
+        programId:
+          type: string
+        requestId:
+          type: string
+        ruleId:
+          type: string
+        tenantId:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.AuthProfileResponse:
+      properties:
+        active:
+          type: boolean
+        cacheTTLSeconds:
+          type: integer
+        config:
+          additionalProperties: {}
+          type: object
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        hasSecret:
+          type: boolean
+        id:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        updatedAt:
+          type: string
+        updatedBy:
+          type: string
+        version:
+          type: integer
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.AuthProfileTestResponse:
+      properties:
+        attempted:
+          type: boolean
+        cached:
+          type: boolean
+        details:
+          additionalProperties: {}
+          type: object
+        httpStatus:
+          type: integer
+        ok:
+          type: boolean
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ChangeEntryResponse:
+      properties:
+        action:
+          type: string
+        actor:
+          type: string
+        actorType:
+          type: string
+        createdAt:
+          type: string
+        entityKey:
+          type: string
+        entityType:
+          type: string
+        fieldChanges:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fi\
+              eldChangeResponse"
+          type: array
+        id:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        parentKey:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.CreateAuthProfileRequest:
+      properties:
+        active:
+          type: boolean
+        cacheTTLSeconds:
+          type: integer
+        config:
+          additionalProperties: {}
+          type: object
+        key:
+          type: string
+        name:
+          type: string
+        secretPayload:
+          additionalProperties:
+            type: string
+          type: object
+        type:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _authprofile.Type"
+      required:
+        - key
+        - name
+        - type
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.CreateExperimentRequest:
+      properties:
+        description:
+          type: string
+        featureKey:
+          type: string
+        metrics:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+              tricRequest"
+          type: array
+        name:
+          type: string
+        variants:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Va\
+              riantRequest"
+          minItems: 2
+          type: array
+      required:
+        - featureKey
+        - name
+        - variants
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.CreateExternalAPIRequest:
+      properties:
+        active:
+          type: boolean
+        expressionVariables:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _externalapi.ExpressionVariable"
+          type: array
+        key:
+          type: string
+        name:
+          type: string
+        params:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _externalapi.Param"
+          type: array
+        request:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.RequestConfig"
+        responseValidation:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.ResponseValidation"
+        secretPayload:
+          additionalProperties:
+            type: string
+          type: object
+      required:
+        - key
+        - name
+        - request
+        - responseValidation
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.CreateFeatureRequest:
+      properties:
+        accessPolicy:
+          type: string
+        activeFrom:
+          type: string
+        activeUntil:
+          type: string
+        authProfileKey:
+          type: string
+        defaultValue: {}
+        description:
+          type: string
+        enabled:
+          type: boolean
+        environments:
+          items:
+            type: string
+          type: array
+        inputContract:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.In\
+            putContractRequest"
+        key:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        tags:
+          items:
+            type: string
+          type: array
+        trialUntil:
+          type: string
+        trialValue: {}
+        valueType:
+          type: string
+      required:
+        - defaultValue
+        - key
+        - name
+        - valueType
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.CreateMemberRequest:
+      properties:
+        displayName:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+      required:
+        - email
+        - role
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.CreatePackRequest:
+      properties:
+        description:
+          type: string
+        enabled:
+          type: boolean
+        featureKeys:
+          items:
+            type: string
+          type: array
+        inheritsFrom:
+          items:
+            type: string
+          type: array
+        key:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        tierKey:
+          type: string
+        trialUntil:
+          type: string
+      required:
+        - key
+        - name
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.CreateRuleRequest:
+      properties:
+        enabled:
+          type: boolean
+        expression:
+          type: string
+        externalApiBindings:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+              ternalAPIBindingRequest"
+          type: array
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        priority:
+          type: integer
+        rolloutPercentage:
+          type: integer
+        sourceBindings:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.So\
+            urceBindingsRequest"
+        value: {}
+      required:
+        - expression
+        - name
+        - value
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.CreateScheduleRequest:
+      properties:
+        changeType:
+          type: string
+        payload:
+          additionalProperties: {}
+          type: object
+        scheduledAt:
+          type: string
+      required:
+        - changeType
+        - payload
+        - scheduledAt
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.CreateSegmentRequest:
+      properties:
+        description:
+          type: string
+        key:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+      required:
+        - key
+        - name
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DashboardActivityItem:
+      properties:
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        description:
+          type: string
+        featureKey:
+          type: string
+        id:
+          type: string
+        type:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DashboardErrorSummaryResponse:
+      properties:
+        byType:
+          additionalProperties:
+            type: integer
+          type: object
+        total:
+          type: integer
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DashboardOperationsResponse:
+      properties:
+        checkedAt:
+          type: string
+        metrics:
+          additionalProperties: {}
+          type: object
+        overallStatus:
+          type: string
+        services:
+          additionalProperties: {}
+          type: object
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DashboardStatsResponse:
+      properties:
+        activeFeatures:
+          type: integer
+        totalFeatures:
+          type: integer
+        totalSegmentMembers:
+          type: integer
+        totalSegments:
+          type: integer
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DataResponse-array_github_com_rendis_feature-evaluator_internal_domain_apikey_APIKey:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _apikey.APIKey"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DataResponse-array_github_com_rendis_feature-evaluator_internal_domain_schedule_ScheduledChange:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _schedule.ScheduledChange"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DataResponse-array_github_com_rendis_feature-evaluator_internal_domain_workspace_Workspace:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _workspace.Workspace"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DataResponse-array_github_com_rendis_feature-evaluator_internal_dto_ActivationResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ac\
+              tivationResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DataResponse-array_github_com_rendis_feature-evaluator_internal_dto_AuthProfileResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Au\
+              thProfileResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DataResponse-array_github_com_rendis_feature-evaluator_internal_dto_ExperimentResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+              perimentResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DataResponse-array_github_com_rendis_feature-evaluator_internal_dto_ExternalAPIResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+              ternalAPIResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DataResponse-array_github_com_rendis_feature-evaluator_internal_dto_MemberResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+              mberResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DataResponse-array_github_com_rendis_feature-evaluator_internal_dto_PackResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+              ckResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DataResponse-array_github_com_rendis_feature-evaluator_internal_dto_RuleResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ru\
+              leResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DataResponse-array_github_com_rendis_feature-evaluator_internal_dto_TagDetailResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ta\
+              gDetailResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DeactivatePackRequest:
+      properties:
+        targetId:
+          type: string
+        targetType:
+          type: string
+      required:
+        - targetId
+        - targetType
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DeclareWinnerRequest:
+      properties:
+        variantKey:
+          type: string
+      required:
+        - variantKey
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.DeclareWinnerResponse:
+      properties:
+        message:
+          type: string
+        variantKey:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ErrorResponse:
+      properties:
+        error:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_pkg_apierror.AP\
+            IError"
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ExperimentResponse:
+      properties:
+        completedAt:
+          type: string
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        description:
+          type: string
+        featureKey:
+          type: string
+        id:
+          type: string
+        metrics:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+              tricResponse"
+          type: array
+        name:
+          type: string
+        startedAt:
+          type: string
+        status:
+          type: string
+        updatedAt:
+          type: string
+        variants:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Va\
+              riantResponse"
+          type: array
+        winnerKey:
+          type: string
+        workspaceKey:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ExpressionSchemaResponse:
+      properties:
+        fields: {}
+        functions: {}
+        notes: {}
+        operators: {}
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ExternalAPIBindingRequest:
+      properties:
+        cacheTTL:
+          type: integer
+        externalApiKey:
+          type: string
+        failMode:
+          type: string
+        paramMappings:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+              ramMappingRequest"
+          type: array
+      required:
+        - externalApiKey
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ExternalAPIBindingResponse:
+      properties:
+        cacheTTL:
+          type: integer
+        externalApiKey:
+          type: string
+        failMode:
+          type: string
+        paramMappings:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+              ramMappingResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ExternalAPIExpressionActionResponse:
+      properties:
+        appliesTo:
+          items:
+            type: string
+          type: array
+        category:
+          type: string
+        detail:
+          type: string
+        id:
+          type: string
+        label:
+          type: string
+        priority:
+          type: integer
+        template:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ExternalAPIExpressionProfileResponse:
+      properties:
+        actions:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+              ternalAPIExpressionActionResponse"
+          type: array
+        keywords:
+          items:
+            type: string
+          type: array
+        symbols:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+              ternalAPIExpressionSymbolResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ExternalAPIExpressionSymbolResponse:
+      properties:
+        description:
+          type: string
+        path:
+          type: string
+        type:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ExternalAPIResponse:
+      properties:
+        active:
+          type: boolean
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        expressionVariables: {}
+        hasSecrets:
+          type: boolean
+        id:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+        params: {}
+        request: {}
+        responseValidation: {}
+        updatedAt:
+          type: string
+        updatedBy:
+          type: string
+        version:
+          type: integer
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ExternalAPITestDetailsResponse:
+      properties:
+        evaluations:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_extern\
+            al.APIEvaluationDetails"
+        request:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+            ternalAPITestRequestResponse"
+        responseBody: {}
+        responseHeaders:
+          additionalProperties:
+            type: string
+          type: object
+        responseText:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ExternalAPITestRequestResponse:
+      properties:
+        body: {}
+        headers:
+          additionalProperties:
+            type: string
+          type: object
+        method:
+          type: string
+        url:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ExternalAPITestResponse:
+      properties:
+        attempted:
+          type: boolean
+        details:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+            ternalAPITestDetailsResponse"
+        httpStatus:
+          type: integer
+        ok:
+          type: boolean
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.FeatureDetailResponse:
+      properties:
+        accessPolicy:
+          type: string
+        activeFrom:
+          type: string
+        activeUntil:
+          type: string
+        authProfileKey:
+          type: string
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        defaultValue: {}
+        description:
+          type: string
+        enabled:
+          type: boolean
+        environments:
+          items:
+            type: string
+          type: array
+        id:
+          type: string
+        inputContract:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.In\
+            putContractResponse"
+        key:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        packs:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+              ckRef"
+          type: array
+        rolloutSalt:
+          type: string
+        ruleCount:
+          type: integer
+        rules:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ru\
+              leResponse"
+          type: array
+        tags:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ta\
+              gResponse"
+          type: array
+        tiers:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ti\
+              erRef"
+          type: array
+        trialUntil:
+          type: string
+        trialValue: {}
+        updatedAt:
+          type: string
+        updatedBy:
+          type: string
+        valueType:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.FeatureExpressionFieldResponse:
+      properties:
+        description:
+          type: string
+        example: {}
+        group:
+          type: string
+        label:
+          type: string
+        path:
+          type: string
+        type:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.FeatureExpressionSchemaResponse:
+      properties:
+        advancedMode:
+          type: boolean
+        derived:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fe\
+              atureExpressionFieldResponse"
+          type: array
+        headers:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fe\
+              atureExpressionFieldResponse"
+          type: array
+        requestBody:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fe\
+              atureExpressionFieldResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.FeatureExpressionTestRequest:
+      properties:
+        expression:
+          type: string
+        externalApiBindings:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+              ternalAPIBindingRequest"
+          type: array
+        scenario:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fe\
+            atureTestScenario"
+        sourceBindings:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.So\
+            urceBindingsRequest"
+      required:
+        - expression
+        - scenario
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.FeatureExpressionTestResponse:
+      properties:
+        derived:
+          additionalProperties: {}
+          type: object
+        error:
+          type: string
+        explanation:
+          type: string
+        matched:
+          type: boolean
+        resolvedSources:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Re\
+              solvedSegmentSourceResponse"
+          type: array
+        result: {}
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.FeatureSummaryResponse:
+      properties:
+        accessPolicy:
+          type: string
+        authProfileKey:
+          type: string
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        description:
+          type: string
+        enabled:
+          type: boolean
+        environments:
+          items:
+            type: string
+          type: array
+        id:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+        packCount:
+          type: integer
+        ruleCount:
+          type: integer
+        tags:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ta\
+              gResponse"
+          type: array
+        tiers:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ti\
+              erRef"
+          type: array
+        trialUntil:
+          type: string
+        updatedAt:
+          type: string
+        updatedBy:
+          type: string
+        valueType:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.FeatureTestScenario:
+      properties:
+        headers:
+          additionalProperties:
+            type: string
+          type: object
+        requestBody:
+          additionalProperties: {}
+          type: object
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.FieldChangeResponse:
+      properties:
+        field:
+          type: string
+        newValue: {}
+        oldValue: {}
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.HealthResponse:
+      properties:
+        checks:
+          additionalProperties: {}
+          type: object
+        status:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ImportResultResponse:
+      properties:
+        datasetVersion:
+          type: string
+        inserted:
+          type: integer
+        previewFields:
+          items:
+            type: string
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ImportSegmentDataRequest:
+      properties:
+        mode:
+          type: string
+        recordKeyPath:
+          type: string
+        records:
+          items:
+            additionalProperties: {}
+            type: object
+          type: array
+        schema:
+          additionalProperties: {}
+          type: object
+        sourceType:
+          type: string
+      required:
+        - mode
+        - recordKeyPath
+        - records
+        - schema
+        - sourceType
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.InputContractRequest:
+      properties:
+        headers:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.In\
+              putHeaderRequest"
+          type: array
+        requestBodyExample:
+          additionalProperties: {}
+          type: object
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.InputContractResponse:
+      properties:
+        headers:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.In\
+              putHeaderResponse"
+          type: array
+        requestBodyExample:
+          additionalProperties: {}
+          type: object
+        requestBodySchema:
+          additionalProperties: {}
+          type: object
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.InputHeaderRequest:
+      properties:
+        description:
+          type: string
+        expressionKey:
+          type: string
+        headerName:
+          type: string
+        label:
+          type: string
+        required:
+          type: boolean
+        type:
+          type: string
+      required:
+        - headerName
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.InputHeaderResponse:
+      properties:
+        description:
+          type: string
+        expressionKey:
+          type: string
+        headerName:
+          type: string
+        label:
+          type: string
+        required:
+          type: boolean
+        type:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ListResponse-github_com_rendis_feature-evaluator_internal_dto_AuditErrorResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Au\
+              ditErrorResponse"
+          type: array
+        pagination:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+            ginationResponse"
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ListResponse-github_com_rendis_feature-evaluator_internal_dto_ChangeEntryResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ch\
+              angeEntryResponse"
+          type: array
+        pagination:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+            ginationResponse"
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ListResponse-github_com_rendis_feature-evaluator_internal_dto_FeatureSummaryResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Fe\
+              atureSummaryResponse"
+          type: array
+        pagination:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+            ginationResponse"
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ListResponse-github_com_rendis_feature-evaluator_internal_dto_SegmentRecordResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Se\
+              gmentRecordResponse"
+          type: array
+        pagination:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+            ginationResponse"
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ListResponse-github_com_rendis_feature-evaluator_internal_dto_SegmentResponse:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Se\
+              gmentResponse"
+          type: array
+        pagination:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Pa\
+            ginationResponse"
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.MemberResponse:
+      properties:
+        addedBy:
+          type: string
+        createdAt:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+        id:
+          type: string
+        role:
+          type: string
+        updatedAt:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.MessageResponse:
+      properties:
+        message:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.MetricRequest:
+      properties:
+        description:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+      required:
+        - key
+        - name
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.MetricResponse:
+      properties:
+        description:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.MetricsCacheResponse:
+      properties:
+        hits:
+          type: integer
+        misses:
+          type: integer
+        ratio:
+          type: number
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.MetricsExternalResponse:
+      properties:
+        cbCloseEvents:
+          type: integer
+        cbOpenEvents:
+          type: integer
+        p50Ms:
+          type: number
+        p95Ms:
+          type: number
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.MetricsFeatureEntry:
+      properties:
+        count:
+          type: integer
+        featureKey:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.MetricsOverviewResponse:
+      properties:
+        today:
+          additionalProperties: {}
+          type: object
+        trend:
+          items:
+            additionalProperties: {}
+            type: object
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.MetricsTenantEntry:
+      properties:
+        count:
+          type: integer
+        tenantId:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.OFREPBulkErrorResponse:
+      properties:
+        errorCode:
+          type: string
+        errorDetails:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.OFREPBulkRequest:
+      properties:
+        context:
+          additionalProperties: {}
+          type: object
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.OFREPBulkResponse:
+      properties:
+        flags:
+          items: {}
+          type: array
+        metadata:
+          additionalProperties: {}
+          type: object
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.OFREPErrorResponse:
+      properties:
+        errorCode:
+          type: string
+        errorDetails:
+          type: string
+        key:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.OFREPEvalRequest:
+      properties:
+        context:
+          additionalProperties: {}
+          type: object
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.OFREPEvalResponse:
+      properties:
+        key:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        reason:
+          type: string
+        value: {}
+        variant:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.PackRef:
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.PackResponse:
+      properties:
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        description:
+          type: string
+        enabled:
+          type: boolean
+        featureKeys:
+          items:
+            type: string
+          type: array
+        id:
+          type: string
+        inheritsFrom:
+          items:
+            type: string
+          type: array
+        key:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        resolvedFeatureCount:
+          type: integer
+        tier:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ti\
+            erRef"
+        tierKey:
+          type: string
+        trialUntil:
+          type: string
+        updatedAt:
+          type: string
+        updatedBy:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.PaginationResponse:
+      properties:
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ParamMappingRequest:
+      properties:
+        inputPath:
+          type: string
+        literalValue:
+          type: string
+        mode:
+          description: '"input" or "literal"'
+          type: string
+        paramName:
+          type: string
+      required:
+        - mode
+        - paramName
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ParamMappingResponse:
+      properties:
+        inputPath:
+          type: string
+        literalValue:
+          type: string
+        mode:
+          type: string
+        paramName:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.RecordConversionRequest:
+      properties:
+        experimentId:
+          type: string
+        metricKey:
+          type: string
+        userId:
+          type: string
+        value:
+          type: number
+      required:
+        - experimentId
+        - metricKey
+        - userId
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ReorderRulesRequest:
+      properties:
+        ruleIds:
+          items:
+            type: string
+          type: array
+      required:
+        - ruleIds
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ResolvedSegmentSourceResponse:
+      properties:
+        data:
+          additionalProperties: {}
+          type: object
+        found:
+          type: boolean
+        lookupPath:
+          type: string
+        lookupValue: {}
+        segmentKey:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.RuleResponse:
+      properties:
+        createdAt:
+          type: string
+        enabled:
+          type: boolean
+        expression:
+          type: string
+        externalApiBindings:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+              ternalAPIBindingResponse"
+          type: array
+        id:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        priority:
+          type: integer
+        rolloutPercentage:
+          type: integer
+        sourceBindings:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.So\
+            urceBindingsResponse"
+        updatedAt:
+          type: string
+        value: {}
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.SegmentRecordResponse:
+      properties:
+        attributes:
+          additionalProperties: {}
+          type: object
+        createdAt:
+          type: string
+        id:
+          type: string
+        recordKey:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.SegmentResponse:
+      properties:
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        description:
+          type: string
+        id:
+          type: string
+        key:
+          type: string
+        lastImportAt:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        previewFields:
+          items:
+            type: string
+          type: array
+        recordCount:
+          type: integer
+        recordKeyPath:
+          type: string
+        sourceType:
+          type: string
+        updatedAt:
+          type: string
+        updatedBy:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.SegmentSchemaResponse:
+      properties:
+        activeDatasetVersion:
+          type: string
+        lastImportAt:
+          type: string
+        previewFields:
+          items:
+            type: string
+          type: array
+        recordCount:
+          type: integer
+        recordKeyPath:
+          type: string
+        schema:
+          additionalProperties: {}
+          type: object
+        segmentKey:
+          type: string
+        sourceType:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.SegmentSourceBindingRequest:
+      properties:
+        lookupPath:
+          type: string
+        segmentKey:
+          type: string
+      required:
+        - lookupPath
+        - segmentKey
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.SegmentSourceBindingResponse:
+      properties:
+        lookupPath:
+          type: string
+        segmentKey:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.SourceBindingsRequest:
+      properties:
+        segments:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Se\
+              gmentSourceBindingRequest"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.SourceBindingsResponse:
+      properties:
+        segments:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Se\
+              gmentSourceBindingResponse"
+          type: array
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.TagDetailResponse:
+      properties:
+        color:
+          type: string
+        createdAt:
+          type: string
+        createdBy:
+          type: string
+        id:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+        updatedAt:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.TagResponse:
+      properties:
+        color:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.TestAuthProfileRequest:
+      properties:
+        active:
+          type: boolean
+        cacheTTLSeconds:
+          type: integer
+        config:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        secretPayload:
+          additionalProperties:
+            type: string
+          type: object
+        testRequest:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Te\
+            stAuthProfileRequestInput"
+        type:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _authprofile.Type"
+      required:
+        - type
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.TestAuthProfileRequestInput:
+      properties:
+        body:
+          additionalProperties: {}
+          type: object
+        headers:
+          additionalProperties:
+            type: string
+          type: object
+        query:
+          additionalProperties:
+            type: string
+          type: object
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.TestExpressionRequest:
+      properties:
+        context:
+          additionalProperties: {}
+          type: object
+        expression:
+          type: string
+      required:
+        - context
+        - expression
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.TestExpressionResponse:
+      properties:
+        error:
+          type: string
+        matched:
+          type: boolean
+        result: {}
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.TestExternalAPIRequest:
+      properties:
+        currentKey:
+          type: string
+        expressionVariables:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _externalapi.ExpressionVariable"
+          type: array
+        key:
+          type: string
+        name:
+          type: string
+        paramValues:
+          additionalProperties: {}
+          type: object
+        params:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _externalapi.Param"
+          type: array
+        replaceSecret:
+          type: boolean
+        request:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.RequestConfig"
+        responseValidation:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.ResponseValidation"
+        secretPayload:
+          additionalProperties:
+            type: string
+          type: object
+      required:
+        - key
+        - name
+        - request
+        - responseValidation
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.TierRef:
+      properties:
+        color:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ToggleFeatureRequest:
+      properties:
+        enabled:
+          type: boolean
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ToggleMessageResponse:
+      properties:
+        enabled:
+          type: boolean
+        message:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.TransferOwnershipRequest:
+      properties:
+        toMemberId:
+          type: string
+      required:
+        - toMemberId
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.UpdateAuthProfileRequest:
+      properties:
+        active:
+          type: boolean
+        cacheTTLSeconds:
+          type: integer
+        config:
+          additionalProperties: {}
+          type: object
+        key:
+          type: string
+        name:
+          type: string
+        replaceSecret:
+          type: boolean
+        secretPayload:
+          additionalProperties:
+            type: string
+          type: object
+        type:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _authprofile.Type"
+      required:
+        - key
+        - name
+        - type
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.UpdateExperimentRequest:
+      properties:
+        description:
+          type: string
+        metrics:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Me\
+              tricRequest"
+          type: array
+        name:
+          type: string
+        variants:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Va\
+              riantRequest"
+          minItems: 2
+          type: array
+      required:
+        - name
+        - variants
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.UpdateExternalAPIRequest:
+      properties:
+        active:
+          type: boolean
+        expressionVariables:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _externalapi.ExpressionVariable"
+          type: array
+        key:
+          type: string
+        name:
+          type: string
+        params:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+              _externalapi.Param"
+          type: array
+        replaceSecret:
+          type: boolean
+        request:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.RequestConfig"
+        responseValidation:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.ResponseValidation"
+        secretPayload:
+          additionalProperties:
+            type: string
+          type: object
+      required:
+        - key
+        - name
+        - request
+        - responseValidation
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.UpdateFeatureRequest:
+      properties:
+        accessPolicy:
+          type: string
+        activeFrom:
+          type: string
+        activeUntil:
+          type: string
+        authProfileKey:
+          type: string
+        defaultValue: {}
+        description:
+          type: string
+        enabled:
+          type: boolean
+        environments:
+          items:
+            type: string
+          type: array
+        inputContract:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.In\
+            putContractRequest"
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        tags:
+          items:
+            type: string
+          type: array
+        trialUntil:
+          type: string
+        trialValue: {}
+        valueType:
+          type: string
+      required:
+        - name
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.UpdatePackRequest:
+      properties:
+        description:
+          type: string
+        enabled:
+          type: boolean
+        featureKeys:
+          items:
+            type: string
+          type: array
+        inheritsFrom:
+          items:
+            type: string
+          type: array
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        tierKey:
+          type: string
+        trialUntil:
+          type: string
+      required:
+        - name
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.UpdateRoleRequest:
+      properties:
+        role:
+          type: string
+      required:
+        - role
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.UpdateRuleRequest:
+      properties:
+        enabled:
+          type: boolean
+        expression:
+          type: string
+        externalApiBindings:
+          items:
+            $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.Ex\
+              ternalAPIBindingRequest"
+          type: array
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        priority:
+          type: integer
+        rolloutPercentage:
+          type: integer
+        sourceBindings:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_dto.So\
+            urceBindingsRequest"
+        value: {}
+      required:
+        - expression
+        - name
+        - value
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.UpdateSegmentRequest:
+      properties:
+        description:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+      required:
+        - name
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ValidateExpressionRequest:
+      properties:
+        expression:
+          type: string
+      required:
+        - expression
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ValidateExpressionResponse:
+      properties:
+        error:
+          type: string
+        valid:
+          type: boolean
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.ValidateExternalAPIExpressionRequest:
+      properties:
+        expression:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.VariantRequest:
+      properties:
+        key:
+          type: string
+        value: {}
+        weight:
+          type: integer
+      required:
+        - key
+      type: object
+    github_com_rendis_feature-evaluator_internal_dto.VariantResponse:
+      properties:
+        key:
+          type: string
+        value: {}
+        weight:
+          type: integer
+      type: object
+    github_com_rendis_feature-evaluator_internal_external.APIEvaluationDetails:
+      properties:
+        expression:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_extern\
+            al.APIExpressionValidationDetails"
+        final:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_extern\
+            al.APIFinalEvaluation"
+        http:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_extern\
+            al.APIHTTPValidationDetails"
+      type: object
+    github_com_rendis_feature-evaluator_internal_external.APIExpressionValidationDetails:
+      properties:
+        applied:
+          type: boolean
+        error:
+          type: string
+        expression:
+          type: string
+        passed:
+          type: boolean
+        resolvedExpression:
+          type: string
+      type: object
+    github_com_rendis_feature-evaluator_internal_external.APIFinalEvaluation:
+      properties:
+        mode:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.ValidationMode"
+        passed:
+          type: boolean
+      type: object
+    github_com_rendis_feature-evaluator_internal_external.APIHTTPValidationDetails:
+      properties:
+        actualStatus:
+          type: integer
+        applied:
+          type: boolean
+        expectedCodes:
+          items:
+            type: integer
+          type: array
+        mode:
+          $ref: "#/components/schemas/github_com_rendis_feature-evaluator_internal_domain\
+            _externalapi.HTTPValidationMode"
+        passed:
+          type: boolean
+      type: object
+    github_com_rendis_feature-evaluator_pkg_apierror.APIError:
+      properties:
+        code:
+          type: string
+        details: {}
+        message:
+          type: string
+        messageKey:
+          type: string
+        requestId:
+          type: string
+      type: object

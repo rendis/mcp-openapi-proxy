@@ -22,7 +22,58 @@ func newGeneratedServer(t *testing.T, specPath string, httpClient *client.Client
 	return srv
 }
 
-func TestE2E_Petstore_ListsToolsAndInvokesEndpoints(t *testing.T) {
+func TestE2E_ToolsList_IsFixedAndLightweight(t *testing.T) {
+	newSession := func(t *testing.T, specPath string) *mcp.ClientSession {
+		t.Helper()
+		srv := newGeneratedServer(
+			t,
+			specPath,
+			client.New(nil, 1<<20),
+			auth.NewResolver("default"),
+			Config{BaseURL: "https://api.example.com", ToolPrefix: "api", AuthProfile: "default"},
+		)
+		return newClientSession(t, srv)
+	}
+
+	petstore := newSession(t, "../../testdata/petstore.yaml")
+	fullContract := newSession(t, "../../testdata/full-contract.yaml")
+
+	for _, session := range []*mcp.ClientSession{petstore, fullContract} {
+		names := listToolNames(t, session)
+		requireToolNamesContain(t, names, "api_list_endpoints", "api_describe_endpoint", "api_call_endpoint")
+		if len(names) != 3 {
+			t.Fatalf("len(names) = %d, want 3", len(names))
+		}
+	}
+
+	petstoreList := listToolsResult(t, petstore)
+	fullContractList := listToolsResult(t, fullContract)
+
+	for _, res := range []*mcp.ListToolsResult{petstoreList, fullContractList} {
+		for _, tool := range res.Tools {
+			if tool.OutputSchema != nil {
+				t.Fatalf("tool %q unexpectedly has OutputSchema", tool.Name)
+			}
+			if tool.InputSchema == nil || tool.InputSchema.Type != "object" {
+				t.Fatalf("tool %q InputSchema = %#v", tool.Name, tool.InputSchema)
+			}
+		}
+	}
+
+	petstoreBytes, err := json.Marshal(petstoreList)
+	if err != nil {
+		t.Fatalf("Marshal petstore ListTools: %v", err)
+	}
+	fullContractBytes, err := json.Marshal(fullContractList)
+	if err != nil {
+		t.Fatalf("Marshal full-contract ListTools: %v", err)
+	}
+	if len(petstoreBytes) != len(fullContractBytes) {
+		t.Fatalf("ListTools payload size differs across specs: petstore=%d full-contract=%d", len(petstoreBytes), len(fullContractBytes))
+	}
+}
+
+func TestE2E_Petstore_ListDescribeCall(t *testing.T) {
 	var gotQuery string
 	var gotBody map[string]any
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,10 +106,46 @@ func TestE2E_Petstore_ListsToolsAndInvokesEndpoints(t *testing.T) {
 	)
 	session := newClientSession(t, srv)
 
-	names := listToolNames(t, session)
-	requireToolNamesContain(t, names, "api_get_pets", "api_post_pets")
+	listRes := callToolViaSession(t, session, "api_list_endpoints", map[string]any{
+		"path_prefix": "/pets",
+		"limit":       10,
+	})
+	listPayload := envelopeFromResult(t, listRes)
+	items := listPayload["items"].([]any)
+	if len(items) < 2 {
+		t.Fatalf("items = %#v", items)
+	}
+	requireListedEndpoint(t, items, "api_get_pets", "GET", "/pets")
+	requireListedEndpoint(t, items, "api_post_pets", "POST", "/pets")
 
-	getRes := callToolViaSession(t, session, "api_get_pets", map[string]any{
+	describeRes := callToolViaSession(t, session, "api_describe_endpoint", map[string]any{
+		"toolName": "api_post_pets",
+	})
+	describePayload := envelopeFromResult(t, describeRes)
+	if describePayload["toolName"] != "api_post_pets" {
+		t.Fatalf("toolName = %#v", describePayload["toolName"])
+	}
+	if describePayload["method"] != "POST" {
+		t.Fatalf("method = %#v", describePayload["method"])
+	}
+	if describePayload["path"] != "/pets" {
+		t.Fatalf("path = %#v", describePayload["path"])
+	}
+	requestBody := describePayload["requestBody"].(map[string]any)
+	if required, _ := requestBody["required"].(bool); !required {
+		t.Fatalf("requestBody.required = %#v", requestBody["required"])
+	}
+	content := requestBody["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("requestBody.content = %#v", content)
+	}
+	firstContent := content[0].(map[string]any)
+	if firstContent["contentType"] != "application/json" {
+		t.Fatalf("contentType = %#v", firstContent["contentType"])
+	}
+
+	getRes := callToolViaSession(t, session, "api_call_endpoint", map[string]any{
+		"toolName": "api_get_pets",
 		"query": map[string]any{
 			"limit": 10,
 			"tags":  []string{"cat", "dog"},
@@ -78,8 +165,9 @@ func TestE2E_Petstore_ListsToolsAndInvokesEndpoints(t *testing.T) {
 		t.Fatalf("unexpected query = %q", gotQuery)
 	}
 
-	postRes := callToolViaSession(t, session, "api_post_pets", map[string]any{
-		"body": map[string]any{"name": "Buddy"},
+	postRes := callToolViaSession(t, session, "api_call_endpoint", map[string]any{
+		"toolName": "api_post_pets",
+		"body":     map[string]any{"name": "Buddy"},
 	})
 	if postRes.IsError {
 		t.Fatalf("unexpected error result: %#v", envelopeFromResult(t, postRes))
@@ -115,11 +203,25 @@ func TestE2E_HeadersAndAuth_PreservesErrorEnvelope(t *testing.T) {
 	)
 	session := newClientSession(t, srv)
 
-	names := listToolNames(t, session)
-	requireToolNamesContain(t, names, "api_get_resources")
+	listRes := callToolViaSession(t, session, "api_list_endpoints", map[string]any{
+		"method": "GET",
+		"auth":   "bearer",
+	})
+	listPayload := envelopeFromResult(t, listRes)
+	items := listPayload["items"].([]any)
+	requireListedEndpoint(t, items, "api_get_resources", "GET", "/resources")
 
-	res := callToolViaSession(t, session, "api_get_resources", map[string]any{
-		"headers": map[string]any{"X-Tenant": "acme"},
+	describeRes := callToolViaSession(t, session, "api_describe_endpoint", map[string]any{
+		"toolName": "api_get_resources",
+	})
+	describePayload := envelopeFromResult(t, describeRes)
+	if describePayload["requiredAuth"] != "bearer" {
+		t.Fatalf("requiredAuth = %#v", describePayload["requiredAuth"])
+	}
+
+	res := callToolViaSession(t, session, "api_call_endpoint", map[string]any{
+		"toolName": "api_get_resources",
+		"headers":  map[string]any{"X-Tenant": "acme"},
 	})
 	if !res.IsError {
 		t.Fatal("expected IsError=true for 400 response")
@@ -196,10 +298,8 @@ func TestE2E_EdgeCases_FormsAndMultipart(t *testing.T) {
 	)
 	session := newClientSession(t, srv)
 
-	names := listToolNames(t, session)
-	requireToolNamesContain(t, names, "api_post_upload", "api_post_submit")
-
-	uploadRes := callToolViaSession(t, session, "api_post_upload", map[string]any{
+	uploadRes := callToolViaSession(t, session, "api_call_endpoint", map[string]any{
+		"toolName": "api_post_upload",
 		"body": map[string]any{
 			"file": map[string]any{
 				"source":       "base64",
@@ -216,7 +316,8 @@ func TestE2E_EdgeCases_FormsAndMultipart(t *testing.T) {
 		t.Fatalf("unexpected upload payload: %q %q", uploadFilename, uploadContent)
 	}
 
-	submitRes := callToolViaSession(t, session, "api_post_submit", map[string]any{
+	submitRes := callToolViaSession(t, session, "api_call_endpoint", map[string]any{
+		"toolName": "api_post_submit",
 		"body": map[string]any{
 			"name":  "Alice",
 			"email": "alice@example.com",
@@ -233,14 +334,14 @@ func TestE2E_EdgeCases_FormsAndMultipart(t *testing.T) {
 	}
 }
 
-func TestE2E_FullContract_DeprecatedToolRegistration(t *testing.T) {
+func TestE2E_FullContract_DeprecatedDiscovery(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		exclude bool
 		present bool
 	}{
 		{name: "included by default", exclude: false, present: true},
-		{name: "excluded when requested", exclude: true, present: false},
+		{name: "excluded when configured", exclude: true, present: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newGeneratedServer(
@@ -251,12 +352,37 @@ func TestE2E_FullContract_DeprecatedToolRegistration(t *testing.T) {
 				Config{BaseURL: "https://api.example.com", ToolPrefix: "api", AuthProfile: "default", ExcludeDeprecated: tc.exclude},
 			)
 			session := newClientSession(t, srv)
-			names := listToolNames(t, session)
-			if tc.present {
-				requireToolNamesContain(t, names, "api_put_items_id")
-			} else {
-				requireToolNamesOmit(t, names, "api_put_items_id")
+
+			listRes := callToolViaSession(t, session, "api_list_endpoints", map[string]any{
+				"path_prefix": "/items",
+				"limit":       50,
+			})
+			items := envelopeFromResult(t, listRes)["items"].([]any)
+			hasDeprecated := listedEndpointPresent(items, "api_put_items_id")
+			if hasDeprecated != tc.present {
+				t.Fatalf("deprecated endpoint presence = %v, want %v", hasDeprecated, tc.present)
 			}
 		})
 	}
+}
+
+func requireListedEndpoint(t *testing.T, items []any, toolName, method, path string) {
+	t.Helper()
+	for _, item := range items {
+		entry := item.(map[string]any)
+		if entry["toolName"] == toolName && entry["method"] == method && entry["path"] == path {
+			return
+		}
+	}
+	t.Fatalf("endpoint %q %s %s not found in %#v", toolName, method, path, items)
+}
+
+func listedEndpointPresent(items []any, toolName string) bool {
+	for _, item := range items {
+		entry := item.(map[string]any)
+		if entry["toolName"] == toolName {
+			return true
+		}
+	}
+	return false
 }
