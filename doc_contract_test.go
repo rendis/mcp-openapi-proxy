@@ -116,12 +116,14 @@ func TestDocumentation_ExplainsMCPAwareLoginSetup(t *testing.T) {
 		body string
 	}{
 		{name: "README", body: readme},
+		{name: "AGENTS", body: agents},
 		{name: "SKILL", body: skill},
 	} {
 		t.Run(doc.name, func(t *testing.T) {
 			requiredFragments := []string{
 				"install",
 				".mcp.json",
+				".codex/config.toml",
 				"MCP_AUTH_TOKEN",
 				"MCP_OIDC_ISSUER",
 				"MCP_OIDC_CLIENT_ID",
@@ -129,6 +131,11 @@ func TestDocumentation_ExplainsMCPAwareLoginSetup(t *testing.T) {
 				"mcp-openapi-proxy login my-api",
 				"mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json",
 				"mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server my-api",
+				"mcp-openapi-proxy login --codex-server my-api",
+				"mcp-openapi-proxy login --codex-config ~/.codex/config.toml",
+				"mcp-openapi-proxy login --codex-config ~/.codex/config.toml --server my-api",
+				"codex mcp add",
+				"codex mcp login",
 				"shell",
 				"prompts you to choose one",
 				"docker",
@@ -145,9 +152,14 @@ func TestDocumentation_ExplainsMCPAwareLoginSetup(t *testing.T) {
 		"login <mcp_name>",
 		"--mcp-config <path>",
 		"--mcp-config <path> --server <mcp_name>",
-		"shell env > selected `mcpServers.<name>.env`",
+		"--codex-config <path>",
+		"--codex-config <path> --server <name>",
+		"--codex-server <name>",
+		"env-first, then falls back to `./.mcp.json`, then `~/.codex/config.toml`",
+		"selected config entry env (`mcpServers.<name>.env` or `mcp_servers.<name>.env`)",
 		"normalized basename is `mcp-openapi-proxy`",
 		"`go`, `env`, `docker`, or shell scripts",
+		"`codex mcp login` is not the correct flow",
 	}
 	for _, fragment := range requiredAgentsFragments {
 		if !strings.Contains(agents, fragment) {

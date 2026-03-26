@@ -29,6 +29,17 @@ func writeMCPConfig(t *testing.T, dir, raw string) string {
 	return path
 }
 
+func writeCodexConfig(t *testing.T, path, raw string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
+	}
+	return path
+}
+
 func chdirTemp(t *testing.T, dir string) {
 	t.Helper()
 	prev, err := os.Getwd()
@@ -154,6 +165,10 @@ func TestRunServe_RequiresSpec(t *testing.T) {
 
 func TestRunLogin_RequiresConfiguration(t *testing.T) {
 	clearLoginEnv(t)
+	dir := t.TempDir()
+	chdirTemp(t, dir)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), ".codex-home"))
 	err := runLogin()
 	if err == nil || !strings.Contains(err.Error(), "login requires") {
 		t.Fatalf("unexpected error: %v", err)
@@ -191,9 +206,37 @@ func TestParseLoginArgs(t *testing.T) {
 		}
 	})
 
+	t.Run("codex config without server is allowed", func(t *testing.T) {
+		got, err := parseLoginArgs([]string{"--codex-config", "/tmp/config.toml"})
+		if err != nil {
+			t.Fatalf("parseLoginArgs: %v", err)
+		}
+		if got.Server != "" || got.CodexConfigPath != "/tmp/config.toml" {
+			t.Fatalf("got = %#v", got)
+		}
+	})
+
+	t.Run("codex server uses default codex config", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "/tmp/codex-home")
+		got, err := parseLoginArgs([]string{"--codex-server", "feature-evaluator"})
+		if err != nil {
+			t.Fatalf("parseLoginArgs: %v", err)
+		}
+		if got.Server != "feature-evaluator" || got.CodexConfigPath != "/tmp/codex-home/config.toml" {
+			t.Fatalf("got = %#v", got)
+		}
+	})
+
 	t.Run("positional and server mismatch", func(t *testing.T) {
 		_, err := parseLoginArgs([]string{"feature-evaluator", "--server", "other"})
 		if err == nil || !strings.Contains(err.Error(), "mismatch") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("positional and codex config conflict", func(t *testing.T) {
+		_, err := parseLoginArgs([]string{"feature-evaluator", "--codex-config", "/tmp/config.toml"})
+		if err == nil || !strings.Contains(err.Error(), "--codex-config") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -230,6 +273,13 @@ func TestIsDirectMCPProxyCommand(t *testing.T) {
 		if isDirectMCPProxyCommand(command) {
 			t.Fatalf("expected ineligible command %q", command)
 		}
+	}
+}
+
+func TestDefaultCodexConfigPath(t *testing.T) {
+	t.Setenv("CODEX_HOME", "/tmp/codex-home")
+	if got := defaultCodexConfigPath(os.Getenv); got != "/tmp/codex-home/config.toml" {
+		t.Fatalf("defaultCodexConfigPath = %q", got)
 	}
 }
 
@@ -281,7 +331,7 @@ func TestLoadMCPServerEnv(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := loadMCPServerEnv(path, "feature-evaluator")
-		if err == nil || !strings.Contains(err.Error(), "does not define mcpServers") {
+		if err == nil || !strings.Contains(err.Error(), "does not define any MCP servers") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -320,6 +370,72 @@ func TestEligibleMCPServerNames(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("eligibleMCPServerNames = %#v, want %#v", got, want)
 	}
+}
+
+func TestLoadCodexServerEnv(t *testing.T) {
+	dir := t.TempDir()
+	path := writeCodexConfig(t, filepath.Join(dir, "config.toml"), `
+[mcp_servers.feature-evaluator]
+command = "/Users/rendis/go/bin/mcp-openapi-proxy"
+
+[mcp_servers.feature-evaluator.env]
+MCP_BASE_URL = "https://api.example.com"
+MCP_TOOL_PREFIX = "fe"
+`)
+
+	env, err := loadCodexServerEnv(path, "feature-evaluator")
+	if err != nil {
+		t.Fatalf("loadCodexServerEnv: %v", err)
+	}
+	if env["MCP_BASE_URL"] != "https://api.example.com" || env["MCP_TOOL_PREFIX"] != "fe" {
+		t.Fatalf("env = %#v", env)
+	}
+}
+
+func TestSelectCodexServer(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("auto selects only eligible server", func(t *testing.T) {
+		path := writeCodexConfig(t, filepath.Join(dir, "single.toml"), `
+[mcp_servers.other]
+command = "docker"
+
+[mcp_servers.feature-evaluator]
+command = "/Users/rendis/go/bin/mcp-openapi-proxy"
+
+[mcp_servers.feature-evaluator.env]
+MCP_BASE_URL = "https://api.example.com"
+`)
+		if got, err := selectCodexServer(path); err != nil || got != "feature-evaluator" {
+			t.Fatalf("selectCodexServer = (%q, %v)", got, err)
+		}
+	})
+
+	t.Run("multiple eligible servers list options when non-interactive", func(t *testing.T) {
+		path := writeCodexConfig(t, filepath.Join(dir, "multi.toml"), `
+[mcp_servers.alpha]
+command = "mcp-openapi-proxy"
+
+[mcp_servers.alpha.env]
+MCP_BASE_URL = "https://alpha.example.com"
+
+[mcp_servers.beta]
+command = "C:\\tools\\mcp-openapi-proxy.exe"
+
+[mcp_servers.beta.env]
+MCP_BASE_URL = "https://beta.example.com"
+`)
+		var output bytes.Buffer
+		setLoginPromptIO(t, false, "", &output)
+
+		_, err := selectCodexServer(path)
+		if err == nil || !strings.Contains(err.Error(), "--codex-server") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(output.String(), "alpha") || !strings.Contains(output.String(), "beta") {
+			t.Fatalf("output = %q", output.String())
+		}
+	})
 }
 
 func TestSelectMCPServer(t *testing.T) {
@@ -472,6 +588,35 @@ func TestResolveLoginEnv_PrefersProcessEnv(t *testing.T) {
 	}
 }
 
+func TestResolveLoginEnv_PrefersProcessEnvOverCodexConfig(t *testing.T) {
+	clearLoginEnv(t)
+	t.Setenv("MCP_OIDC_CLIENT_ID", "env-client")
+	t.Setenv("MCP_AUTH_PROFILE", "env-profile")
+
+	path := writeCodexConfig(t, filepath.Join(t.TempDir(), "config.toml"), `
+[mcp_servers.feature-evaluator]
+command = "mcp-openapi-proxy"
+
+[mcp_servers.feature-evaluator.env]
+MCP_OIDC_ISSUER = "https://auth.example.com/realm"
+MCP_OIDC_CLIENT_ID = "config-client"
+MCP_TOOL_PREFIX = "fe"
+MCP_AUTH_PROFILE = "config-profile"
+MCP_SPEC = "./openapi.yaml"
+`)
+
+	env, err := resolveLoginEnv(loginCLIArgs{CodexConfigPath: path, Server: "feature-evaluator"})
+	if err != nil {
+		t.Fatalf("resolveLoginEnv: %v", err)
+	}
+	if env["MCP_OIDC_CLIENT_ID"] != "env-client" || env["MCP_AUTH_PROFILE"] != "env-profile" {
+		t.Fatalf("env = %#v", env)
+	}
+	if env["MCP_OIDC_ISSUER"] != "https://auth.example.com/realm" || env["MCP_TOOL_PREFIX"] != "fe" || env["MCP_SPEC"] != "./openapi.yaml" {
+		t.Fatalf("env = %#v", env)
+	}
+}
+
 func TestRunLogin_ReadsCWDMCPConfigFromPositionalServer(t *testing.T) {
 	clearLoginEnv(t)
 	dir := t.TempDir()
@@ -558,6 +703,39 @@ func TestRunLogin_ReadsCWDMCPConfigWhenEnvIsInsufficient(t *testing.T) {
 	}
 }
 
+func TestRunLogin_FallsBackToCodexConfigWhenMCPConfigIsAbsent(t *testing.T) {
+	clearLoginEnv(t)
+	dir := t.TempDir()
+	chdirTemp(t, dir)
+	codexHome := filepath.Join(t.TempDir(), ".codex-home")
+	t.Setenv("CODEX_HOME", codexHome)
+	_ = writeCodexConfig(t, filepath.Join(codexHome, "config.toml"), `
+[mcp_servers.feature-evaluator]
+command = "/Users/rendis/go/bin/mcp-openapi-proxy"
+
+[mcp_servers.feature-evaluator.env]
+MCP_AUTH_PROFILE = "fe-profile"
+MCP_BASE_URL = "https://codex.example.com"
+`)
+
+	var gotCfg auth.LoginConfig
+	origRunLogin := runAuthLogin
+	runAuthLogin = func(cfg auth.LoginConfig) error {
+		gotCfg = cfg
+		return nil
+	}
+	t.Cleanup(func() {
+		runAuthLogin = origRunLogin
+	})
+
+	if err := runLogin(); err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if gotCfg.TokenPrefix != "fe-profile" || gotCfg.APIBaseURL != "https://codex.example.com" {
+		t.Fatalf("cfg = %#v", gotCfg)
+	}
+}
+
 func TestRunLogin_UsesEnvOnlyWhenAlreadyConfigured(t *testing.T) {
 	clearLoginEnv(t)
 	dir := t.TempDir()
@@ -580,6 +758,37 @@ func TestRunLogin_UsesEnvOnlyWhenAlreadyConfigured(t *testing.T) {
 		t.Fatalf("runLogin: %v", err)
 	}
 	if gotCfg.APIBaseURL != "https://env.example.com" || gotCfg.TokenPrefix != "env-profile" {
+		t.Fatalf("cfg = %#v", gotCfg)
+	}
+}
+
+func TestRunLogin_CodexServerShortcut(t *testing.T) {
+	clearLoginEnv(t)
+	codexHome := filepath.Join(t.TempDir(), ".codex-home")
+	t.Setenv("CODEX_HOME", codexHome)
+	_ = writeCodexConfig(t, filepath.Join(codexHome, "config.toml"), `
+[mcp_servers.feature-evaluator]
+command = "mcp-openapi-proxy"
+
+[mcp_servers.feature-evaluator.env]
+MCP_AUTH_PROFILE = "feature-evaluator-prod"
+MCP_BASE_URL = "https://api.example.com/"
+`)
+
+	var gotCfg auth.LoginConfig
+	origRunLogin := runAuthLogin
+	runAuthLogin = func(cfg auth.LoginConfig) error {
+		gotCfg = cfg
+		return nil
+	}
+	t.Cleanup(func() {
+		runAuthLogin = origRunLogin
+	})
+
+	if err := runLogin("--codex-server", "feature-evaluator"); err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if gotCfg.TokenPrefix != "feature-evaluator-prod" || gotCfg.APIBaseURL != "https://api.example.com" {
 		t.Fatalf("cfg = %#v", gotCfg)
 	}
 }
@@ -617,6 +826,35 @@ func TestRunLogin_ExplicitMCPConfigAndServer(t *testing.T) {
 	}
 	if gotCfg.APIBaseURL != "https://api.example.com" {
 		t.Fatalf("APIBaseURL = %q", gotCfg.APIBaseURL)
+	}
+}
+
+func TestRunLogin_ExplicitCodexConfigAndServer(t *testing.T) {
+	clearLoginEnv(t)
+	path := writeCodexConfig(t, filepath.Join(t.TempDir(), "config.toml"), `
+[mcp_servers.feature-evaluator]
+command = "/Users/rendis/go/bin/mcp-openapi-proxy"
+
+[mcp_servers.feature-evaluator.env]
+MCP_AUTH_PROFILE = "feature-evaluator-prod"
+MCP_BASE_URL = "https://api.example.com/"
+`)
+
+	var gotCfg auth.LoginConfig
+	origRunLogin := runAuthLogin
+	runAuthLogin = func(cfg auth.LoginConfig) error {
+		gotCfg = cfg
+		return nil
+	}
+	t.Cleanup(func() {
+		runAuthLogin = origRunLogin
+	})
+
+	if err := runLogin("--codex-config", path, "--server", "feature-evaluator"); err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if gotCfg.TokenPrefix != "feature-evaluator-prod" || gotCfg.APIBaseURL != "https://api.example.com" {
+		t.Fatalf("cfg = %#v", gotCfg)
 	}
 }
 
@@ -679,6 +917,47 @@ func TestRunLogin_ExplicitMCPConfigWithoutServerErrorsWhenNonInteractive(t *test
 	}
 	if !strings.Contains(output.String(), "alpha") || !strings.Contains(output.String(), "beta") {
 		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestRunLogin_ExplicitCodexConfigWithoutServerPrompts(t *testing.T) {
+	clearLoginEnv(t)
+	path := writeCodexConfig(t, filepath.Join(t.TempDir(), "config.toml"), `
+[mcp_servers.alpha]
+command = "mcp-openapi-proxy"
+
+[mcp_servers.alpha.env]
+MCP_BASE_URL = "https://alpha.example.com"
+
+[mcp_servers.beta]
+command = "/usr/local/bin/mcp-openapi-proxy"
+
+[mcp_servers.beta.env]
+MCP_AUTH_PROFILE = "beta-profile"
+MCP_BASE_URL = "https://beta.example.com/"
+`)
+
+	var output bytes.Buffer
+	setLoginPromptIO(t, true, "beta\n", &output)
+
+	var gotCfg auth.LoginConfig
+	origRunLogin := runAuthLogin
+	runAuthLogin = func(cfg auth.LoginConfig) error {
+		gotCfg = cfg
+		return nil
+	}
+	t.Cleanup(func() {
+		runAuthLogin = origRunLogin
+	})
+
+	if err := runLogin("--codex-config", path); err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if gotCfg.TokenPrefix != "beta-profile" || gotCfg.APIBaseURL != "https://beta.example.com" {
+		t.Fatalf("cfg = %#v", gotCfg)
+	}
+	if !strings.Contains(output.String(), "Select server:") {
+		t.Fatalf("prompt output = %q", output.String())
 	}
 }
 

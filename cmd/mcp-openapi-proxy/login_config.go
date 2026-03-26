@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/BurntSushi/toml"
 )
 
 var loginEnvKeys = []string{
@@ -23,18 +25,23 @@ var loginEnvKeys = []string{
 }
 
 type loginCLIArgs struct {
-	MCPConfigPath string
-	Server        string
+	MCPConfigPath   string
+	CodexConfigPath string
+	Server          string
 }
 
 type mcpConfigFile struct {
 	MCPServers map[string]mcpServerConfig `json:"mcpServers"`
 }
 
+type codexConfigFile struct {
+	MCPServers map[string]mcpServerConfig `toml:"mcp_servers"`
+}
+
 type mcpServerConfig struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	Env     map[string]string `json:"env"`
+	Command string            `json:"command" toml:"command"`
+	Args    []string          `json:"args" toml:"args"`
+	Env     map[string]string `json:"env" toml:"env"`
 }
 
 var (
@@ -46,6 +53,7 @@ var (
 func parseLoginArgs(args []string) (loginCLIArgs, error) {
 	var cfg loginCLIArgs
 	var positional []string
+	var codexServer string
 
 	for i := 0; i < len(args); i++ {
 		arg := strings.TrimSpace(args[i])
@@ -66,6 +74,20 @@ func parseLoginArgs(args []string) (loginCLIArgs, error) {
 			if cfg.MCPConfigPath == "" {
 				return loginCLIArgs{}, fmt.Errorf("--mcp-config requires a path")
 			}
+		case arg == "--codex-config":
+			if i+1 >= len(args) {
+				return loginCLIArgs{}, fmt.Errorf("--codex-config requires a path")
+			}
+			i++
+			cfg.CodexConfigPath = strings.TrimSpace(args[i])
+			if cfg.CodexConfigPath == "" {
+				return loginCLIArgs{}, fmt.Errorf("--codex-config requires a path")
+			}
+		case strings.HasPrefix(arg, "--codex-config="):
+			cfg.CodexConfigPath = strings.TrimSpace(strings.TrimPrefix(arg, "--codex-config="))
+			if cfg.CodexConfigPath == "" {
+				return loginCLIArgs{}, fmt.Errorf("--codex-config requires a path")
+			}
 		case arg == "--server":
 			if i+1 >= len(args) {
 				return loginCLIArgs{}, fmt.Errorf("--server requires a name")
@@ -80,8 +102,22 @@ func parseLoginArgs(args []string) (loginCLIArgs, error) {
 			if cfg.Server == "" {
 				return loginCLIArgs{}, fmt.Errorf("--server requires a name")
 			}
+		case arg == "--codex-server":
+			if i+1 >= len(args) {
+				return loginCLIArgs{}, fmt.Errorf("--codex-server requires a name")
+			}
+			i++
+			codexServer = strings.TrimSpace(args[i])
+			if codexServer == "" {
+				return loginCLIArgs{}, fmt.Errorf("--codex-server requires a name")
+			}
+		case strings.HasPrefix(arg, "--codex-server="):
+			codexServer = strings.TrimSpace(strings.TrimPrefix(arg, "--codex-server="))
+			if codexServer == "" {
+				return loginCLIArgs{}, fmt.Errorf("--codex-server requires a name")
+			}
 		case arg == "-h" || arg == "--help":
-			return loginCLIArgs{}, fmt.Errorf("usage: mcp-openapi-proxy login [<mcp_name>] [--mcp-config <path>] [--server <mcp_name>]")
+			return loginCLIArgs{}, fmt.Errorf("usage: mcp-openapi-proxy login [<mcp_name>] [--mcp-config <path>] [--codex-config <path>] [--server <name>] [--codex-server <name>]")
 		case strings.HasPrefix(arg, "-"):
 			return loginCLIArgs{}, fmt.Errorf("unknown login flag: %s", arg)
 		default:
@@ -92,6 +128,19 @@ func parseLoginArgs(args []string) (loginCLIArgs, error) {
 	if len(positional) > 1 {
 		return loginCLIArgs{}, fmt.Errorf("login accepts at most one positional MCP server name")
 	}
+	if cfg.MCPConfigPath != "" && cfg.CodexConfigPath != "" {
+		return loginCLIArgs{}, fmt.Errorf("login accepts only one config source: --mcp-config or --codex-config")
+	}
+	if codexServer != "" && cfg.Server != "" {
+		return loginCLIArgs{}, fmt.Errorf("login accepts only one explicit server selector: --server or --codex-server")
+	}
+	if len(positional) == 1 && codexServer != "" {
+		return loginCLIArgs{}, fmt.Errorf("login positional MCP server name cannot be combined with --codex-server")
+	}
+	if len(positional) == 1 && cfg.CodexConfigPath != "" {
+		return loginCLIArgs{}, fmt.Errorf("login positional MCP server name cannot be combined with --codex-config")
+	}
+
 	if len(positional) == 1 {
 		if cfg.Server != "" && cfg.Server != positional[0] {
 			return loginCLIArgs{}, fmt.Errorf("login server mismatch: positional %q does not match --server %q", positional[0], cfg.Server)
@@ -101,9 +150,16 @@ func parseLoginArgs(args []string) (loginCLIArgs, error) {
 			cfg.MCPConfigPath = ".mcp.json"
 		}
 	}
+	if codexServer != "" {
+		cfg.Server = codexServer
+		cfg.CodexConfigPath = defaultCodexConfigPath(os.Getenv)
+	}
 
 	if cfg.MCPConfigPath != "" {
 		cfg.MCPConfigPath = filepath.Clean(cfg.MCPConfigPath)
+	}
+	if cfg.CodexConfigPath != "" {
+		cfg.CodexConfigPath = filepath.Clean(cfg.CodexConfigPath)
 	}
 
 	return cfg, nil
@@ -122,35 +178,63 @@ func completeLoginArgs(args loginCLIArgs, processEnv map[string]string) (loginCL
 		args.Server = server
 		return args, nil
 	}
+	if args.CodexConfigPath != "" {
+		server, err := selectCodexServer(args.CodexConfigPath)
+		if err != nil {
+			return loginCLIArgs{}, err
+		}
+		args.Server = server
+		return args, nil
+	}
 
 	if hasSufficientLoginEnv(processEnv) {
 		return args, nil
 	}
 
-	const defaultConfigPath = ".mcp.json"
-	if _, err := os.Stat(defaultConfigPath); err != nil {
-		if os.IsNotExist(err) {
-			return args, nil
+	if _, err := os.Stat(".mcp.json"); err == nil {
+		args.MCPConfigPath = ".mcp.json"
+		server, err := selectMCPServer(args.MCPConfigPath)
+		if err != nil {
+			return loginCLIArgs{}, err
 		}
-		return loginCLIArgs{}, fmt.Errorf("stat %s: %w", defaultConfigPath, err)
+		args.Server = server
+		return args, nil
+	} else if !os.IsNotExist(err) {
+		return loginCLIArgs{}, fmt.Errorf("stat .mcp.json: %w", err)
 	}
 
-	args.MCPConfigPath = defaultConfigPath
-	server, err := selectMCPServer(args.MCPConfigPath)
-	if err != nil {
-		return loginCLIArgs{}, err
+	codexPath := defaultCodexConfigPath(os.Getenv)
+	if _, err := os.Stat(codexPath); err == nil {
+		args.CodexConfigPath = codexPath
+		server, err := selectCodexServer(args.CodexConfigPath)
+		if err != nil {
+			return loginCLIArgs{}, err
+		}
+		args.Server = server
+		return args, nil
+	} else if !os.IsNotExist(err) {
+		return loginCLIArgs{}, fmt.Errorf("stat %s: %w", codexPath, err)
 	}
-	args.Server = server
+
 	return args, nil
 }
 
 func resolveLoginEnv(args loginCLIArgs) (map[string]string, error) {
 	env := currentLoginEnv(os.Getenv)
-	if args.MCPConfigPath == "" {
+	if args.MCPConfigPath == "" && args.CodexConfigPath == "" {
 		return env, nil
 	}
 
-	fileEnv, err := loadMCPServerEnv(args.MCPConfigPath, args.Server)
+	var (
+		fileEnv map[string]string
+		err     error
+	)
+	switch {
+	case args.MCPConfigPath != "":
+		fileEnv, err = loadMCPServerEnv(args.MCPConfigPath, args.Server)
+	case args.CodexConfigPath != "":
+		fileEnv, err = loadCodexServerEnv(args.CodexConfigPath, args.Server)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -178,16 +262,41 @@ func loadMCPConfig(path string) (mcpConfigFile, error) {
 	return cfg, nil
 }
 
+func loadCodexConfig(path string) (codexConfigFile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return codexConfigFile{}, fmt.Errorf("read codex config %s: %w", path, err)
+	}
+
+	var cfg codexConfigFile
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return codexConfigFile{}, fmt.Errorf("parse codex config %s: %w", path, err)
+	}
+	return cfg, nil
+}
+
 func loadMCPServerEnv(path, serverName string) (map[string]string, error) {
 	cfg, err := loadMCPConfig(path)
 	if err != nil {
 		return nil, err
 	}
-	if len(cfg.MCPServers) == 0 {
-		return nil, fmt.Errorf("mcp config %s does not define mcpServers", path)
+	return loadServerEnvFromMap("mcp config", path, cfg.MCPServers, serverName)
+}
+
+func loadCodexServerEnv(path, serverName string) (map[string]string, error) {
+	cfg, err := loadCodexConfig(path)
+	if err != nil {
+		return nil, err
+	}
+	return loadServerEnvFromMap("codex config", path, cfg.MCPServers, serverName)
+}
+
+func loadServerEnvFromMap(label, path string, servers map[string]mcpServerConfig, serverName string) (map[string]string, error) {
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("%s %s does not define any MCP servers", label, path)
 	}
 
-	server, ok := cfg.MCPServers[serverName]
+	server, ok := servers[serverName]
 	if !ok {
 		return nil, fmt.Errorf("mcp server %q not found in %s", serverName, path)
 	}
@@ -207,28 +316,44 @@ func selectMCPServer(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(cfg.MCPServers) == 0 {
-		return "", fmt.Errorf("mcp config %s does not define mcpServers", path)
+	return selectServerFromMap("mcp config", path, cfg.MCPServers, "rerun with --server <name> or login <mcp_name>")
+}
+
+func selectCodexServer(path string) (string, error) {
+	cfg, err := loadCodexConfig(path)
+	if err != nil {
+		return "", err
+	}
+	return selectServerFromMap("codex config", path, cfg.MCPServers, "rerun with --server <name> or --codex-server <name>")
+}
+
+func selectServerFromMap(label, path string, servers map[string]mcpServerConfig, retryHint string) (string, error) {
+	if len(servers) == 0 {
+		return "", fmt.Errorf("%s %s does not define any MCP servers", label, path)
 	}
 
-	names := eligibleMCPServerNames(cfg)
+	names := eligibleServerNames(servers)
 	switch len(names) {
 	case 0:
-		return "", fmt.Errorf("mcp config %s does not define any direct mcp-openapi-proxy servers", path)
+		return "", fmt.Errorf("%s %s does not define any direct mcp-openapi-proxy servers", label, path)
 	case 1:
 		return names[0], nil
 	default:
 		if !loginIsInteractive() {
 			printEligibleMCPServers(loginPromptOutput, path, names)
-			return "", fmt.Errorf("multiple mcp-openapi-proxy servers found in %s; rerun with --server <name> or login <mcp_name>", path)
+			return "", fmt.Errorf("multiple mcp-openapi-proxy servers found in %s; %s", path, retryHint)
 		}
 		return promptForMCPServer(path, names, loginPromptInput, loginPromptOutput)
 	}
 }
 
 func eligibleMCPServerNames(cfg mcpConfigFile) []string {
-	names := make([]string, 0, len(cfg.MCPServers))
-	for name, server := range cfg.MCPServers {
+	return eligibleServerNames(cfg.MCPServers)
+}
+
+func eligibleServerNames(servers map[string]mcpServerConfig) []string {
+	names := make([]string, 0, len(servers))
+	for name, server := range servers {
 		if isDirectMCPProxyCommand(server.Command) {
 			names = append(names, name)
 		}
@@ -252,6 +377,17 @@ func normalizeCommandName(command string) string {
 
 func isDirectMCPProxyCommand(command string) bool {
 	return normalizeCommandName(command) == "mcp-openapi-proxy"
+}
+
+func defaultCodexConfigPath(getenv func(string) string) string {
+	if codexHome := strings.TrimSpace(getenv("CODEX_HOME")); codexHome != "" {
+		return filepath.Clean(filepath.Join(codexHome, "config.toml"))
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return filepath.Clean(filepath.Join("~", ".codex", "config.toml"))
+	}
+	return filepath.Join(home, ".codex", "config.toml")
 }
 
 func printEligibleMCPServers(out io.Writer, path string, names []string) {

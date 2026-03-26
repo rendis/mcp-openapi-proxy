@@ -28,18 +28,32 @@ Go CLI that converts OpenAPI 3.x specs into a lightweight MCP stdio navigator/ex
 - `github.com/google/jsonschema-go` — JSON Schema for tool inputs
 
 ## Build & Run
+- Install latest binary: `go install github.com/rendis/mcp-openapi-proxy/cmd/mcp-openapi-proxy@latest`
 - `go build -C . -o bin/mcp-openapi-proxy ./cmd/mcp-openapi-proxy`
 - Config is 100% env vars: `MCP_SPEC`, optional `MCP_BASE_URL`, `MCP_TOOL_PREFIX`, `MCP_AUTH_PROFILE`, `MCP_AUTH_TOKEN`, `MCP_OIDC_ISSUER`, `MCP_OIDC_CLIENT_ID`, `MCP_OIDC_SCOPES`, `MCP_EXTRA_HEADERS`, `MCP_MAX_BODY_BYTES`, `MCP_ALLOW_INSECURE_HTTP`, `MCP_EXCLUDE_DEPRECATED`, plus `MCP_AUTH_<SCHEME>_*`
+- Claude Code uses `.mcp.json`; Codex global install uses `codex mcp add <name> ... -- mcp-openapi-proxy`; Codex project-local config is manual in `./.codex/config.toml`
+- Static token path: put `MCP_AUTH_TOKEN` in the MCP client config entry
+- OIDC login examples:
+  - `mcp-openapi-proxy login`
+  - `mcp-openapi-proxy login my-api`
+  - `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json`
+  - `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server my-api`
+  - `mcp-openapi-proxy login --codex-server my-api`
+  - `mcp-openapi-proxy login --codex-config ~/.codex/config.toml`
+  - `mcp-openapi-proxy login --codex-config ~/.codex/config.toml --server my-api`
 
 ## Conventions
 - Tests: `go test ./...` — run before committing
 - Registered MCP tools: `{prefix}_list_endpoints`, `{prefix}_describe_endpoint`, `{prefix}_call_endpoint`
 - Endpoint IDs: `{prefix}_{method}_{sanitized_path}` (lowercase, special chars → `_`, collapsed)
 - Auth resolution priority: per-scheme `MCP_AUTH_<SCHEME>_*` > global `MCP_AUTH_TOKEN` > OIDC token cache for `MCP_AUTH_PROFILE`
-- `login` supports env-only mode, `login <mcp_name>` using `./.mcp.json`, `login --mcp-config <path>`, and `login --mcp-config <path> --server <mcp_name>`
-- For `.mcp.json`-aware login, precedence is shell env > selected `mcpServers.<name>.env` > existing defaults
-- If `login` omits the server name and `.mcp.json` contains multiple eligible entries, it lists the available `mcp-openapi-proxy` servers and prompts for a choice on interactive stdin
-- `.mcp.json` login discovery only considers direct `command` values whose normalized basename is `mcp-openapi-proxy` (including full paths and `.exe`); wrappers like `go`, `env`, `docker`, or shell scripts are intentionally ignored
+- `login` supports env-only mode, `login <mcp_name>` using `./.mcp.json`, `login --mcp-config <path>`, `login --mcp-config <path> --server <mcp_name>`, `login --codex-config <path>`, `login --codex-config <path> --server <name>`, and `login --codex-server <name>`
+- Plain `login` is env-first, then falls back to `./.mcp.json`, then `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`) when shell env is insufficient
+- For config-aware login, precedence is shell env > selected config entry env (`mcpServers.<name>.env` or `mcp_servers.<name>.env`) > existing defaults
+- If `login` omits the server name and the selected config contains multiple eligible entries, it lists the available `mcp-openapi-proxy` servers and prompts you to choose one on interactive stdin
+- `.mcp.json` and Codex TOML login discovery only consider direct `command` values whose normalized basename is `mcp-openapi-proxy` (including full paths and `.exe`); wrappers like `go`, `env`, `docker`, or shell scripts are intentionally ignored
+- Codex global install is documented via `codex mcp add <name> ... -- mcp-openapi-proxy`; Codex project-local config is manual in `./.codex/config.toml`
+- For this stdio server, use `mcp-openapi-proxy login` for API auth; `codex mcp login` is not the correct flow
 - Tokens stored at `~/.mcp-openapi-proxy/{profile}-tokens.json` with 0600 perms
 - `list_endpoints` returns lightweight discovery items with `toolName`, `method`, `path`, `description`, `requiredAuth`, `tags`, `deprecated`
 - `describe_endpoint` returns the full normalized OpenAPI contract for one endpoint
@@ -61,6 +75,6 @@ Go CLI that converts OpenAPI 3.x specs into a lightweight MCP stdio navigator/ex
 - Path/query/header/cookie serialization follows OpenAPI `style` / `explode`; path params are URL-encoded
 - Non-JSON API responses are returned as raw text strings; binary responses are wrapped as base64 objects
 - Trailing slash on `MCP_BASE_URL` is stripped automatically
-- `.mcp.json` lookup and interactive server selection are implemented only for `login`; `serve`, `logout`, and `status` still read process env only
+- `.mcp.json` / Codex config lookup and interactive server selection are implemented only for `login`; `serve`, `logout`, and `status` still read process env only
 - OIDC token refresh uses detached context (context.Background)
 - Token file writes are atomic (tmp + rename)

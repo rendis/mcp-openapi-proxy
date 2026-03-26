@@ -31,7 +31,10 @@ mcp-openapi-proxy
 Recommended setup flow:
 
 1. Install `mcp-openapi-proxy`
-2. Create `.mcp.json` from the generic example in [`.mcp.json.example`](../../.mcp.json.example)
+2. Configure your MCP client:
+   - Claude Code: create `.mcp.json` from [`.mcp.json.example`](../../.mcp.json.example)
+   - Codex global: run `codex mcp add ...`
+   - Codex project-local: create `./.codex/config.toml` manually
 3. Choose auth:
    - Static token: add `MCP_AUTH_TOKEN`
    - OIDC: add `MCP_OIDC_ISSUER` and `MCP_OIDC_CLIENT_ID`, then run one of:
@@ -39,12 +42,20 @@ Recommended setup flow:
      - `mcp-openapi-proxy login <mcp_name>`
      - `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json`
      - `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server <mcp_name>`
+     - `mcp-openapi-proxy login --codex-server <name>`
+     - `mcp-openapi-proxy login --codex-config ~/.codex/config.toml`
+     - `mcp-openapi-proxy login --codex-config ~/.codex/config.toml --server <name>`
 4. Start the MCP client
 5. Use `list_endpoints`, `describe_endpoint`, and `call_endpoint`
 
-When `login` is invoked with `.mcp.json` support, it reads the selected server’s `env` from `.mcp.json`. Shell env still overrides `.mcp.json` when both are present.
+When `login` is invoked with `.mcp.json` or Codex config support, it reads the selected server’s `env` from that config entry. Shell env still overrides the config file when both are present.
 
-If the server name is omitted, `login` discovers eligible servers from `.mcp.json`. It only considers direct `command` values that point to the `mcp-openapi-proxy` binary (plain name, full path, or `.exe` path). Wrapper commands such as `go`, `env`, `docker`, or shell scripts are ignored. If more than one eligible server exists, `login` prints the options and prompts you to choose one.
+Plain `mcp-openapi-proxy login` stays env-first. When shell env is not enough, it falls back to:
+
+1. `./.mcp.json`
+2. `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`)
+
+If the server name is omitted, `login` discovers eligible servers from the selected config file. It only considers direct `command` values that point to the `mcp-openapi-proxy` binary (plain name, full path, or `.exe` path). Wrapper commands such as `go`, `env`, `docker`, or shell scripts are ignored. If more than one eligible server exists, `login` prints the options and prompts you to choose one.
 
 If the source spec comes from `swag init`, convert it before using the proxy. `swag init` emits Swagger 2.0, while `mcp-openapi-proxy` expects OpenAPI 3.x:
 
@@ -158,6 +169,34 @@ mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server my-api
 
 ### OpenAI Codex (`.codex/config.toml`)
 
+Global install via Codex CLI:
+
+```bash
+codex mcp add my-api \
+  --env MCP_SPEC=./openapi.yaml \
+  --env MCP_BASE_URL=https://api.example.com \
+  --env MCP_TOOL_PREFIX=myapi \
+  --env MCP_AUTH_TOKEN=your-token \
+  -- mcp-openapi-proxy
+```
+
+OIDC variant via Codex CLI:
+
+```bash
+codex mcp add my-api \
+  --env MCP_SPEC=./openapi.yaml \
+  --env MCP_BASE_URL=https://api.example.com \
+  --env MCP_TOOL_PREFIX=myapi \
+  --env MCP_AUTH_PROFILE=myapi \
+  --env MCP_OIDC_ISSUER=https://auth.example.com/realms/myrealm \
+  --env MCP_OIDC_CLIENT_ID=my-client \
+  -- mcp-openapi-proxy
+```
+
+Global Codex installs go into `~/.codex/config.toml`.
+
+Project-local Codex config is manual because the visible `codex mcp add` help does not expose a project-scoped install mode. Use `./.codex/config.toml` when you want repo-local configuration:
+
 ```toml
 [mcp_servers.my-api]
 command = "mcp-openapi-proxy"
@@ -168,6 +207,19 @@ MCP_BASE_URL = "https://api.example.com"
 MCP_TOOL_PREFIX = "myapi"
 MCP_AUTH_TOKEN = "your-token"
 ```
+
+For this stdio server, use `mcp-openapi-proxy login`, not `codex mcp login`:
+
+```bash
+mcp-openapi-proxy login --codex-server my-api
+mcp-openapi-proxy login --codex-config ~/.codex/config.toml
+mcp-openapi-proxy login --codex-config ~/.codex/config.toml --server my-api
+mcp-openapi-proxy login --codex-config ./.codex/config.toml --server my-api
+```
+
+`codex mcp login` is for OAuth that Codex manages itself. Here the proxy owns OIDC discovery, PKCE, and token storage.
+
+If local `./.codex/config.toml` is ignored, switch to the global `~/.codex/config.toml` path or use a trusted project in Codex.
 
 ### Gemini CLI (`~/.gemini/settings.json`)
 
@@ -228,16 +280,19 @@ MCP_OIDC_CLIENT_ID=my-client \
 mcp-openapi-proxy login
 ```
 
-If your MCP client uses `.mcp.json`, these forms now read the selected server’s `env` automatically:
+If your MCP client uses `.mcp.json` or Codex TOML, these forms now read the selected server’s `env` automatically:
 
 - `mcp-openapi-proxy login`
 - `mcp-openapi-proxy login my-api`
 - `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json`
 - `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server my-api`
+- `mcp-openapi-proxy login --codex-server my-api`
+- `mcp-openapi-proxy login --codex-config ~/.codex/config.toml`
+- `mcp-openapi-proxy login --codex-config ~/.codex/config.toml --server my-api`
 
 Keep the same `MCP_AUTH_PROFILE`, `MCP_OIDC_ISSUER`, and `MCP_OIDC_CLIENT_ID` values there so the running server uses the token cache created by `login`.
 
-If the server name is omitted, `login` only considers direct `mcp-openapi-proxy` commands from `.mcp.json`. Wrapper commands such as `go`, `env`, `docker`, or shell scripts are not eligible for login discovery. When multiple eligible entries exist, `login` lists them and prompts you to choose one.
+If the server name is omitted, `login` only considers direct `mcp-openapi-proxy` commands from the selected config file. Wrapper commands such as `go`, `env`, `docker`, or shell scripts are not eligible for login discovery. When multiple eligible entries exist, `login` lists them and prompts you to choose one.
 
 If you also set those values in the shell when invoking `login`, the shell values win.
 
