@@ -106,6 +106,56 @@ func TestDocumentation_StatesSwagger2ConversionRequirement(t *testing.T) {
 	}
 }
 
+func TestDocumentation_ExplainsMCPAwareLoginSetup(t *testing.T) {
+	readme := readDoc(t, "README.md")
+	agents := readDoc(t, "AGENTS.md")
+	skill := readDoc(t, "skills/mcp-openapi-proxy/SKILL.md")
+
+	for _, doc := range []struct {
+		name string
+		body string
+	}{
+		{name: "README", body: readme},
+		{name: "SKILL", body: skill},
+	} {
+		t.Run(doc.name, func(t *testing.T) {
+			requiredFragments := []string{
+				"install",
+				".mcp.json",
+				"MCP_AUTH_TOKEN",
+				"MCP_OIDC_ISSUER",
+				"MCP_OIDC_CLIENT_ID",
+				"mcp-openapi-proxy login",
+				"mcp-openapi-proxy login my-api",
+				"mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json",
+				"mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server my-api",
+				"shell",
+				"prompts you to choose one",
+				"docker",
+			}
+			for _, fragment := range requiredFragments {
+				if !strings.Contains(doc.body, fragment) {
+					t.Fatalf("%s missing fragment %q", doc.name, fragment)
+				}
+			}
+		})
+	}
+
+	requiredAgentsFragments := []string{
+		"login <mcp_name>",
+		"--mcp-config <path>",
+		"--mcp-config <path> --server <mcp_name>",
+		"shell env > selected `mcpServers.<name>.env`",
+		"normalized basename is `mcp-openapi-proxy`",
+		"`go`, `env`, `docker`, or shell scripts",
+	}
+	for _, fragment := range requiredAgentsFragments {
+		if !strings.Contains(agents, fragment) {
+			t.Fatalf("AGENTS missing fragment %q", fragment)
+		}
+	}
+}
+
 func TestExampleMCPJSON_ExistsAndIsGeneric(t *testing.T) {
 	data, err := os.ReadFile(".mcp.json.example")
 	if err != nil {
@@ -134,7 +184,7 @@ func TestExampleMCPJSON_ExistsAndIsGeneric(t *testing.T) {
 	if !ok {
 		t.Fatalf("env = %#v", server["env"])
 	}
-	for _, key := range []string{"MCP_SPEC", "MCP_BASE_URL", "MCP_TOOL_PREFIX", "MCP_AUTH_PROFILE"} {
+	for _, key := range []string{"MCP_SPEC", "MCP_BASE_URL", "MCP_TOOL_PREFIX", "MCP_AUTH_PROFILE", "MCP_OIDC_ISSUER", "MCP_OIDC_CLIENT_ID"} {
 		if _, ok := env[key]; !ok {
 			t.Fatalf(".mcp.json.example missing %q in env", key)
 		}

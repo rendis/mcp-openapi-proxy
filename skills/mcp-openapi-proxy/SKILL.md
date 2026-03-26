@@ -34,9 +34,17 @@ Recommended setup flow:
 2. Create `.mcp.json` from the generic example in [`.mcp.json.example`](../../.mcp.json.example)
 3. Choose auth:
    - Static token: add `MCP_AUTH_TOKEN`
-   - OIDC: add `MCP_OIDC_ISSUER` and `MCP_OIDC_CLIENT_ID`, then run `mcp-openapi-proxy login`
+   - OIDC: add `MCP_OIDC_ISSUER` and `MCP_OIDC_CLIENT_ID`, then run one of:
+     - `mcp-openapi-proxy login`
+     - `mcp-openapi-proxy login <mcp_name>`
+     - `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json`
+     - `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server <mcp_name>`
 4. Start the MCP client
 5. Use `list_endpoints`, `describe_endpoint`, and `call_endpoint`
+
+When `login` is invoked with `.mcp.json` support, it reads the selected server’s `env` from `.mcp.json`. Shell env still overrides `.mcp.json` when both are present.
+
+If the server name is omitted, `login` discovers eligible servers from `.mcp.json`. It only considers direct `command` values that point to the `mcp-openapi-proxy` binary (plain name, full path, or `.exe` path). Wrapper commands such as `go`, `env`, `docker`, or shell scripts are ignored. If more than one eligible server exists, `login` prints the options and prompts you to choose one.
 
 If the source spec comes from `swag init`, convert it before using the proxy. `swag init` emits Swagger 2.0, while `mcp-openapi-proxy` expects OpenAPI 3.x:
 
@@ -124,6 +132,30 @@ OIDC variant:
 }
 ```
 
+OIDC login from `.mcp.json`:
+
+```bash
+mcp-openapi-proxy login
+```
+
+Or select the server explicitly:
+
+```bash
+mcp-openapi-proxy login my-api
+```
+
+Or with an explicit config path:
+
+```bash
+mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json
+```
+
+Or with an explicit config path plus explicit server:
+
+```bash
+mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server my-api
+```
+
 ### OpenAI Codex (`.codex/config.toml`)
 
 ```toml
@@ -196,7 +228,18 @@ MCP_OIDC_CLIENT_ID=my-client \
 mcp-openapi-proxy login
 ```
 
-If your MCP client uses `.mcp.json`, keep the same `MCP_AUTH_PROFILE`, `MCP_OIDC_ISSUER`, and `MCP_OIDC_CLIENT_ID` values there so the running server uses the token cache created by `login`.
+If your MCP client uses `.mcp.json`, these forms now read the selected server’s `env` automatically:
+
+- `mcp-openapi-proxy login`
+- `mcp-openapi-proxy login my-api`
+- `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json`
+- `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server my-api`
+
+Keep the same `MCP_AUTH_PROFILE`, `MCP_OIDC_ISSUER`, and `MCP_OIDC_CLIENT_ID` values there so the running server uses the token cache created by `login`.
+
+If the server name is omitted, `login` only considers direct `mcp-openapi-proxy` commands from `.mcp.json`. Wrapper commands such as `go`, `env`, `docker`, or shell scripts are not eligible for login discovery. When multiple eligible entries exist, `login` lists them and prompts you to choose one.
+
+If you also set those values in the shell when invoking `login`, the shell values win.
 
 **Application-specific discovery:**
 

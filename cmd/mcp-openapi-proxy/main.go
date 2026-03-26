@@ -13,6 +13,12 @@ import (
 
 const tokenPrefix = "default"
 
+var (
+	discoverOIDCEndpoints = auth.DiscoverOIDCEndpoints
+	runAuthLogin          = auth.RunLogin
+	loadSpec              = spec.LoadSpec
+)
+
 func main() {
 	cmd := "serve"
 	if len(os.Args) > 1 {
@@ -24,7 +30,7 @@ func main() {
 	case "serve", "":
 		err = runServe()
 	case "login":
-		err = runLogin()
+		err = runLogin(os.Args[2:]...)
 	case "logout":
 		err = runLogout()
 	case "status":
@@ -71,32 +77,59 @@ func runServe() error {
 	return server.Run(cfg, extraHeaders)
 }
 
-func runLogin() error {
-	cfg := auth.LoginConfig{
-		TokenPrefix: resolveAuthProfile(os.Getenv("MCP_TOOL_PREFIX")),
-		Scopes:      resolveOIDCScopes(),
+func runLogin(args ...string) error {
+	loginArgs, err := parseLoginArgs(args)
+	if err != nil {
+		return err
 	}
 
-	issuer := os.Getenv("MCP_OIDC_ISSUER")
-	clientID := os.Getenv("MCP_OIDC_CLIENT_ID")
+	loginArgs, err = completeLoginArgs(loginArgs, currentLoginEnv(os.Getenv))
+	if err != nil {
+		return err
+	}
+
+	env, err := resolveLoginEnv(loginArgs)
+	if err != nil {
+		return err
+	}
+	return runLoginWithEnv(env)
+}
+
+func runLoginWithEnv(env map[string]string) error {
+	cfg := auth.LoginConfig{
+		TokenPrefix: resolveAuthProfileValues(env["MCP_AUTH_PROFILE"], env["MCP_TOOL_PREFIX"]),
+		Scopes:      resolveOIDCScopesFromEnv(env),
+	}
+
+	issuer := strings.TrimSpace(env["MCP_OIDC_ISSUER"])
+	clientID := strings.TrimSpace(env["MCP_OIDC_CLIENT_ID"])
 
 	if issuer != "" && clientID != "" {
 		// Discover endpoints via .well-known/openid-configuration (standard OIDC).
-		authEP, tokenEP, err := auth.DiscoverOIDCEndpoints(issuer)
+		authEP, tokenEP, err := discoverOIDCEndpoints(issuer)
 		if err != nil {
 			return fmt.Errorf("OIDC discovery from %s: %w", issuer, err)
 		}
 		cfg.AuthEndpoint = authEP
 		cfg.TokenEndpoint = tokenEP
 		cfg.ClientID = clientID
-	} else if baseURL := os.Getenv("MCP_BASE_URL"); baseURL != "" {
+	} else if baseURL := strings.TrimRight(strings.TrimSpace(env["MCP_BASE_URL"]), "/"); baseURL != "" {
 		// Fetch auth config from API.
 		cfg.APIBaseURL = baseURL
 	} else {
 		return fmt.Errorf("login requires MCP_OIDC_ISSUER + MCP_OIDC_CLIENT_ID, or MCP_BASE_URL")
 	}
 
-	return auth.RunLogin(cfg)
+	return runAuthLogin(cfg)
+}
+
+func hasSufficientLoginEnv(env map[string]string) bool {
+	issuer := strings.TrimSpace(env["MCP_OIDC_ISSUER"])
+	clientID := strings.TrimSpace(env["MCP_OIDC_CLIENT_ID"])
+	if issuer != "" && clientID != "" {
+		return true
+	}
+	return strings.TrimSpace(env["MCP_BASE_URL"]) != ""
 }
 
 func runLogout() error {
@@ -149,32 +182,40 @@ func resolveTokenProvider() auth.TokenProvider {
 }
 
 func resolveAuthProfile(toolPrefix string) string {
-	if profile := strings.TrimSpace(os.Getenv("MCP_AUTH_PROFILE")); profile != "" {
+	return resolveAuthProfileValues(os.Getenv("MCP_AUTH_PROFILE"), toolPrefix)
+}
+
+func resolveAuthProfileValues(authProfile, toolPrefix string) string {
+	if profile := strings.TrimSpace(authProfile); profile != "" {
 		return profile
 	}
-	if toolPrefix != "" {
+	if toolPrefix = strings.TrimSpace(toolPrefix); toolPrefix != "" {
 		return toolPrefix
 	}
 	return "default"
 }
 
 func resolveOIDCScopes() string {
-	if scopes := strings.TrimSpace(os.Getenv("MCP_OIDC_SCOPES")); scopes != "" {
+	return resolveOIDCScopesFromEnv(currentLoginEnv(os.Getenv))
+}
+
+func resolveOIDCScopesFromEnv(env map[string]string) string {
+	if scopes := strings.TrimSpace(env["MCP_OIDC_SCOPES"]); scopes != "" {
 		return scopes
 	}
-	specSource := strings.TrimSpace(os.Getenv("MCP_SPEC"))
+	specSource := strings.TrimSpace(env["MCP_SPEC"])
 	if specSource == "" {
 		return ""
 	}
-	_, doc, err := spec.LoadSpec(specSource)
+	_, doc, err := loadSpec(specSource)
 	if err != nil || doc == nil {
 		return ""
 	}
-	scopes := spec.CollectOAuthScopes(doc)
-	if len(scopes) == 0 {
+	collectedScopes := spec.CollectOAuthScopes(doc)
+	if len(collectedScopes) == 0 {
 		return ""
 	}
-	return strings.Join(scopes, " ")
+	return strings.Join(collectedScopes, " ")
 }
 
 func parseBoolEnv(name string) bool {

@@ -6,7 +6,9 @@
         "MCP_SPEC": "./openapi.yaml",
         "MCP_BASE_URL": "https://api.example.com",
         "MCP_TOOL_PREFIX": "myapi",
-        "MCP_AUTH_PROFILE": "myapi"
+        "MCP_AUTH_PROFILE": "myapi",
+        "MCP_OIDC_ISSUER": "https://auth.example.com/realms/myrealm",
+        "MCP_OIDC_CLIENT_ID": "my-client"
       }
     }
   }

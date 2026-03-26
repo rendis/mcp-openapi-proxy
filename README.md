@@ -101,9 +101,22 @@ If `MCP_BASE_URL` is omitted, the proxy falls back to a single absolute server d
 
 3. Choose one auth path:
    - Static token: add `MCP_AUTH_TOKEN` to `.mcp.json`
-   - OIDC login: add `MCP_OIDC_ISSUER` and `MCP_OIDC_CLIENT_ID` to `.mcp.json`, then run `mcp-openapi-proxy login` once with the same values
+   - OIDC login: add `MCP_OIDC_ISSUER` and `MCP_OIDC_CLIENT_ID` to `.mcp.json`, then run one of:
+     - `mcp-openapi-proxy login`
+     - `mcp-openapi-proxy login <mcp_name>`
+     - `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json`
+     - `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server <mcp_name>`
 
 4. Open your MCP client and use the server through `list_endpoints`, `describe_endpoint`, and `call_endpoint`.
+
+When `login` is invoked with `.mcp.json` support, it reads the selected server’s `env` from `.mcp.json`. If the same variable is present in both places, the shell environment wins.
+
+If the server name is omitted, `login` discovers eligible entries from `.mcp.json`:
+
+- direct `command: "mcp-openapi-proxy"`
+- direct paths such as `"/path/to/bin/mcp-openapi-proxy"` or `"C:\\tools\\mcp-openapi-proxy.exe"`
+
+Wrapper commands such as `go`, `env`, `docker`, or shell scripts are ignored on purpose. If more than one eligible server exists, `login` shows the available names and prompts you to choose one.
 
 ### If your spec comes from `swag init`
 
@@ -161,6 +174,9 @@ All configuration is done through environment variables.
 | `mcp-openapi-proxy` | Start the MCP server (default, same as `serve`) |
 | `mcp-openapi-proxy serve` | Start the MCP server explicitly |
 | `mcp-openapi-proxy login` | Browser-based OIDC Authorization Code + PKCE login |
+| `mcp-openapi-proxy login <mcp_name>` | Run login using `./.mcp.json` and `mcpServers.<mcp_name>.env` |
+| `mcp-openapi-proxy login --mcp-config <path>` | Run login using an MCP config file, auto-selecting or prompting for an eligible `mcp-openapi-proxy` server |
+| `mcp-openapi-proxy login --mcp-config <path> --server <mcp_name>` | Run login using a selected server from an MCP config file |
 | `mcp-openapi-proxy logout` | Remove stored tokens from disk |
 | `mcp-openapi-proxy status` | Display current authentication state |
 
@@ -226,7 +242,33 @@ OIDC variant:
 }
 ```
 
-If you use the OIDC variant, run login once before starting Claude Code:
+If you use the OIDC variant, run login once before starting Claude Code. You can now do that directly from the `.mcp.json` entry:
+
+```bash
+mcp-openapi-proxy login
+```
+
+Or select the server explicitly:
+
+```bash
+mcp-openapi-proxy login my-api
+```
+
+Or against an explicit config path:
+
+```bash
+mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json
+```
+
+Or with an explicit config path plus explicit server:
+
+```bash
+mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server my-api
+```
+
+When the server name is omitted, `login` only considers `.mcp.json` entries whose `command` is a direct `mcp-openapi-proxy` binary or path to that binary. Wrapper commands such as `go`, `env`, `docker`, or shell scripts are not used for login discovery.
+
+Equivalent env-only form:
 
 ```bash
 MCP_AUTH_PROFILE=myapi \
@@ -497,7 +539,16 @@ MCP_OIDC_CLIENT_ID=my-client \
 mcp-openapi-proxy login
 ```
 
-When you use an MCP client config file such as `.mcp.json`, keep the same `MCP_AUTH_PROFILE`, `MCP_OIDC_ISSUER`, and `MCP_OIDC_CLIENT_ID` values there so the running server reads the token cache created by `login`.
+When you use an MCP client config file such as `.mcp.json`, all of these forms can read the selected server’s `env` automatically:
+
+- `mcp-openapi-proxy login`
+- `mcp-openapi-proxy login my-api`
+- `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json`
+- `mcp-openapi-proxy login --mcp-config ./path/to/.mcp.json --server my-api`
+
+If the server name is omitted, `login` discovers only direct `mcp-openapi-proxy` commands from `.mcp.json` (binary name or full path, including `.exe` on Windows). Wrapper commands such as `go`, `env`, `docker`, or shell scripts are intentionally ignored. When multiple eligible entries exist, `login` prints the available server names and asks you to choose one.
+
+If you set any of those variables in the shell when invoking `login`, the shell values override `.mcp.json`.
 
 Fetches `{issuer}/.well-known/openid-configuration` and extracts `authorization_endpoint` and `token_endpoint`. This is the [standard OIDC Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html) mechanism.
 

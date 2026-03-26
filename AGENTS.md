@@ -36,6 +36,10 @@ Go CLI that converts OpenAPI 3.x specs into a lightweight MCP stdio navigator/ex
 - Registered MCP tools: `{prefix}_list_endpoints`, `{prefix}_describe_endpoint`, `{prefix}_call_endpoint`
 - Endpoint IDs: `{prefix}_{method}_{sanitized_path}` (lowercase, special chars → `_`, collapsed)
 - Auth resolution priority: per-scheme `MCP_AUTH_<SCHEME>_*` > global `MCP_AUTH_TOKEN` > OIDC token cache for `MCP_AUTH_PROFILE`
+- `login` supports env-only mode, `login <mcp_name>` using `./.mcp.json`, `login --mcp-config <path>`, and `login --mcp-config <path> --server <mcp_name>`
+- For `.mcp.json`-aware login, precedence is shell env > selected `mcpServers.<name>.env` > existing defaults
+- If `login` omits the server name and `.mcp.json` contains multiple eligible entries, it lists the available `mcp-openapi-proxy` servers and prompts for a choice on interactive stdin
+- `.mcp.json` login discovery only considers direct `command` values whose normalized basename is `mcp-openapi-proxy` (including full paths and `.exe`); wrappers like `go`, `env`, `docker`, or shell scripts are intentionally ignored
 - Tokens stored at `~/.mcp-openapi-proxy/{profile}-tokens.json` with 0600 perms
 - `list_endpoints` returns lightweight discovery items with `toolName`, `method`, `path`, `description`, `requiredAuth`, `tags`, `deprecated`
 - `describe_endpoint` returns the full normalized OpenAPI contract for one endpoint
@@ -57,5 +61,6 @@ Go CLI that converts OpenAPI 3.x specs into a lightweight MCP stdio navigator/ex
 - Path/query/header/cookie serialization follows OpenAPI `style` / `explode`; path params are URL-encoded
 - Non-JSON API responses are returned as raw text strings; binary responses are wrapped as base64 objects
 - Trailing slash on `MCP_BASE_URL` is stripped automatically
+- `.mcp.json` lookup and interactive server selection are implemented only for `login`; `serve`, `logout`, and `status` still read process env only
 - OIDC token refresh uses detached context (context.Background)
 - Token file writes are atomic (tmp + rename)
