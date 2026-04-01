@@ -100,6 +100,16 @@ func (r *Resolver) applyScheme(ctx context.Context, applied *AppliedAuth, scheme
 
 	case scheme.Type == "apiKey":
 		key := envValue(scheme.Name, "KEY")
+		if key == "" && strings.EqualFold(scheme.In, "header") && strings.EqualFold(scheme.ParameterName, "Authorization") {
+			// Swagger 2.0 represents bearer tokens as apiKey in Authorization header.
+			// Fall back to OIDC token resolution.
+			token, err := r.resolveBearerToken(ctx, scheme.Name, true)
+			if err != nil {
+				return fmt.Errorf("%s requires MCP_AUTH_%s_KEY or an OIDC login", scheme.Name, envSchemeName(scheme.Name))
+			}
+			applied.Headers.Set("Authorization", "Bearer "+token)
+			return nil
+		}
 		if key == "" {
 			return fmt.Errorf("%s requires MCP_AUTH_%s_KEY", scheme.Name, envSchemeName(scheme.Name))
 		}
