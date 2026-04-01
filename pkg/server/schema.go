@@ -47,7 +47,7 @@ func buildCallEndpointInputSchema() *jsonschema.Schema {
 			"query":    genericArgumentSectionSchema(),
 			"headers":  genericArgumentSectionSchema(),
 			"cookies":  genericArgumentSectionSchema(),
-			"body":     map[string]any{},
+			"body":     genericArgumentSectionSchema(),
 		},
 		"required":             []string{"toolName"},
 		"additionalProperties": false,
