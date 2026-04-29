@@ -441,7 +441,8 @@ Input:
 
 - API `4xx/5xx` responses preserve the real HTTP response and set `IsError=true`
 - Proxy/runtime failures return `status: 0` plus `proxy_error`
-- Binary payloads are represented as base64 wrappers
+- Binary payloads are represented as base64 wrappers in the envelope `body`
+- `image/*` and `audio/*` responses additionally emit a native `mcp.ImageContent` / `mcp.AudioContent` block alongside the text envelope, so capable clients render them inline
 - Deprecated endpoints are listed by default and only excluded with `MCP_EXCLUDE_DEPRECATED=1`
 
 ## Multiple APIs
