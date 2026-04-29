@@ -212,6 +212,130 @@ func TestBuildHandler_RejectsInsecureRemoteAuth(t *testing.T) {
 	}
 }
 
+func TestBuildHandler_EmitsImageContentForBinaryResponse(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01, 0x02, 0x03}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(pngBytes)
+	}))
+	defer api.Close()
+
+	ep := spec.Endpoint{
+		Method:    "GET",
+		Path:      "/icon",
+		Responses: []spec.ResponseInfo{{StatusCode: "200", Content: []spec.MediaType{{ContentType: "image/png"}}}},
+	}
+	handler := newHandler(ep, Config{BaseURL: api.URL, ToolPrefix: "api", AuthProfile: "default"})
+	result, err := handler(context.Background(), toolRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error result: %#v", envelopeFromResult(t, result))
+	}
+	if len(result.Content) != 2 {
+		t.Fatalf("expected 2 content blocks (text + image), got %d", len(result.Content))
+	}
+	img, ok := result.Content[1].(*mcp.ImageContent)
+	if !ok {
+		t.Fatalf("expected ImageContent at index 1, got %T", result.Content[1])
+	}
+	if img.MIMEType != "image/png" {
+		t.Fatalf("MIMEType = %q", img.MIMEType)
+	}
+	if !bytes.Equal(img.Data, pngBytes) {
+		t.Fatalf("image bytes mismatch: got %x", img.Data)
+	}
+	env := envelopeFromResult(t, result)
+	if env["content_type"] != "image/png" {
+		t.Fatalf("envelope content_type = %#v", env["content_type"])
+	}
+}
+
+func TestBuildHandler_EmitsAudioContentForBinaryResponse(t *testing.T) {
+	audio := []byte{0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write(audio)
+	}))
+	defer api.Close()
+
+	ep := spec.Endpoint{
+		Method:    "GET",
+		Path:      "/clip",
+		Responses: []spec.ResponseInfo{{StatusCode: "200", Content: []spec.MediaType{{ContentType: "audio/mpeg"}}}},
+	}
+	handler := newHandler(ep, Config{BaseURL: api.URL, ToolPrefix: "api", AuthProfile: "default"})
+	result, err := handler(context.Background(), toolRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if len(result.Content) != 2 {
+		t.Fatalf("expected 2 content blocks (text + audio), got %d", len(result.Content))
+	}
+	got, ok := result.Content[1].(*mcp.AudioContent)
+	if !ok {
+		t.Fatalf("expected AudioContent at index 1, got %T", result.Content[1])
+	}
+	if got.MIMEType != "audio/mpeg" {
+		t.Fatalf("MIMEType = %q", got.MIMEType)
+	}
+	if !bytes.Equal(got.Data, audio) {
+		t.Fatalf("audio bytes mismatch: got %x", got.Data)
+	}
+}
+
+func TestBuildHandler_SVGImageEmitsImageContent(t *testing.T) {
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>`
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		_, _ = io.WriteString(w, svg)
+	}))
+	defer api.Close()
+
+	ep := spec.Endpoint{
+		Method:    "GET",
+		Path:      "/icon.svg",
+		Responses: []spec.ResponseInfo{{StatusCode: "200", Content: []spec.MediaType{{ContentType: "image/svg+xml"}}}},
+	}
+	handler := newHandler(ep, Config{BaseURL: api.URL, ToolPrefix: "api", AuthProfile: "default"})
+	result, err := handler(context.Background(), toolRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if len(result.Content) != 2 {
+		t.Fatalf("expected 2 content blocks, got %d", len(result.Content))
+	}
+	img, ok := result.Content[1].(*mcp.ImageContent)
+	if !ok {
+		t.Fatalf("expected ImageContent at index 1, got %T", result.Content[1])
+	}
+	if string(img.Data) != svg {
+		t.Fatalf("svg bytes mismatch: %q", string(img.Data))
+	}
+}
+
+func TestBuildHandler_NonMediaResponseHasNoExtraContent(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer api.Close()
+
+	ep := loadEndpoint(t, "/pets", "GET", "../../testdata/petstore.yaml")
+	handler := newHandler(ep, Config{BaseURL: api.URL, ToolPrefix: "api", AuthProfile: "default"})
+	result, err := handler(context.Background(), toolRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if len(result.Content) != 1 {
+		t.Fatalf("expected single text content block, got %d", len(result.Content))
+	}
+	if _, ok := result.Content[0].(*mcp.TextContent); !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+}
+
 func TestSerializeRequestBody_PathSourceReadsFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "blob.txt")
 	if err := os.WriteFile(path, []byte("hello"), 0644); err != nil {

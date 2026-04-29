@@ -109,7 +109,7 @@ func callEndpointArgs(ctx context.Context, ep spec.Endpoint, httpClient *client.
 		"body":         resp.Body,
 	}
 	warnOnResponseSchemaDrift(ep, resp)
-	return toolResult(envelope, resp.StatusCode >= 400), nil
+	return toolResultWithMedia(envelope, resp.StatusCode >= 400, mediaContentForResponse(resp)), nil
 }
 
 func decodeArguments(req *mcp.CallToolRequest) (map[string]any, error) {
@@ -704,14 +704,59 @@ func selectResponseSchema(resp spec.ResponseInfo, contentType string) map[string
 }
 
 func toolResult(envelope map[string]any, isError bool) *mcp.CallToolResult {
+	return toolResultWithMedia(envelope, isError, nil)
+}
+
+func toolResultWithMedia(envelope map[string]any, isError bool, extras []mcp.Content) *mcp.CallToolResult {
 	text := formatJSON(envelope)
+	content := make([]mcp.Content, 0, 1+len(extras))
+	content = append(content, &mcp.TextContent{Text: text})
+	content = append(content, extras...)
 	return &mcp.CallToolResult{
 		IsError:           isError,
 		StructuredContent: envelope,
-		Content: []mcp.Content{
-			&mcp.TextContent{Text: text},
-		},
+		Content:           content,
 	}
+}
+
+// mediaContentForResponse promotes binary image/audio responses to native MCP
+// ImageContent/AudioContent blocks so clients can render them inline. The JSON
+// envelope keeps carrying the same body data for backwards compatibility.
+func mediaContentForResponse(resp *client.Response) []mcp.Content {
+	if resp == nil {
+		return nil
+	}
+	contentType := resp.ContentType
+	switch {
+	case strings.HasPrefix(contentType, "image/"):
+		data, ok := mediaBytesFromBody(resp.Body)
+		if !ok {
+			return nil
+		}
+		return []mcp.Content{&mcp.ImageContent{Data: data, MIMEType: contentType}}
+	case strings.HasPrefix(contentType, "audio/"):
+		data, ok := mediaBytesFromBody(resp.Body)
+		if !ok {
+			return nil
+		}
+		return []mcp.Content{&mcp.AudioContent{Data: data, MIMEType: contentType}}
+	}
+	return nil
+}
+
+func mediaBytesFromBody(body any) ([]byte, bool) {
+	switch v := body.(type) {
+	case client.BinaryBody:
+		data, err := base64.StdEncoding.DecodeString(v.DataBase64)
+		if err != nil {
+			return nil, false
+		}
+		return data, true
+	case string:
+		// Text-based media (e.g. image/svg+xml) is decoded as a UTF-8 string.
+		return []byte(v), true
+	}
+	return nil, false
 }
 
 func proxyErrorResult(code, message string, details any) *mcp.CallToolResult {
