@@ -63,6 +63,7 @@ flowchart LR
 - **Extra headers** — inject custom headers (workspace IDs, API versions) into every request
 - **Lightweight discovery** — `tools/list` stays small while `describe_endpoint` exposes the full OpenAPI contract on demand
 - **Structured call output** — `call_endpoint` returns a typed envelope with `status`, `content_type`, `headers`, and `body`
+- **Native image and audio content** — `image/*` and `audio/*` responses are also surfaced as native MCP `ImageContent` / `AudioContent` blocks so capable clients can render them inline
 - **Forms and binary payloads** — supports `multipart/form-data`, `application/x-www-form-urlencoded`, text payloads, and `application/octet-stream`
 - **stdio transport** — compatible with Claude Code, OpenAI Codex, Gemini CLI, and any MCP client
 
@@ -522,7 +523,8 @@ Workspace context is passed as a header per request, for example `headers: {"X-W
 
 - API `4xx/5xx` responses set `IsError=true` but preserve the real HTTP response
 - Proxy/runtime failures return `status: 0` plus a `proxy_error` object
-- Binary responses are wrapped as `{ "encoding": "base64", "data_base64": "...", "size_bytes": 123 }`
+- Binary responses are wrapped as `{ "encoding": "base64", "data_base64": "...", "size_bytes": 123 }` inside the envelope `body`
+- `image/*` and `audio/*` responses additionally emit a native MCP `ImageContent` / `AudioContent` block alongside the text envelope (`Content[0]` is still the JSON envelope so existing consumers keep working)
 
 ## Authentication
 
@@ -746,6 +748,7 @@ pkg/
    - JSON body → parsed object in `body`
     - Text/XML/CSV/HTML → raw string in `body`
     - Binary responses → `{encoding, data_base64, size_bytes}` in `body`
+    - `image/*` / `audio/*` responses → additional native `ImageContent` / `AudioContent` block emitted alongside the text envelope
     - Empty responses → `body` is `null`
     - `4xx/5xx` API responses keep the same envelope and set `IsError=true`
     - Proxy failures use `status: 0` plus `proxy_error`
