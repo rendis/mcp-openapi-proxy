@@ -78,3 +78,15 @@ paths:
       responses:
         "500":
           description: Internal server error
+  /image:
+    get:
+      summary: Returns a PNG image
+      operationId: getImage
+      responses:
+        "200":
+          description: PNG image bytes
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary

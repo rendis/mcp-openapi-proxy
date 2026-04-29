@@ -182,6 +182,51 @@ func TestE2E_Petstore_ListDescribeCall(t *testing.T) {
 	}
 }
 
+func TestE2E_ImageResponse_RoundTripsAsImageContent(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xde, 0xad, 0xbe, 0xef}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(pngBytes)
+	}))
+	defer api.Close()
+
+	srv := newGeneratedServer(
+		t,
+		"../../testdata/responses.yaml",
+		client.New(nil, 1<<20),
+		auth.NewResolver("default"),
+		Config{BaseURL: api.URL, ToolPrefix: "api", AuthProfile: "default"},
+	)
+	session := newClientSession(t, srv)
+
+	res := callToolViaSession(t, session, "api_call_endpoint", map[string]any{
+		"toolName": "api_get_image",
+	})
+	if res.IsError {
+		t.Fatalf("unexpected error result: %#v", envelopeFromResult(t, res))
+	}
+	if len(res.Content) != 2 {
+		t.Fatalf("expected text + image content, got %d blocks", len(res.Content))
+	}
+	img, ok := res.Content[1].(*mcp.ImageContent)
+	if !ok {
+		t.Fatalf("expected ImageContent at index 1, got %T", res.Content[1])
+	}
+	if img.MIMEType != "image/png" {
+		t.Fatalf("MIMEType = %q", img.MIMEType)
+	}
+	if string(img.Data) != string(pngBytes) {
+		t.Fatalf("image bytes mismatch: got %x want %x", img.Data, pngBytes)
+	}
+	env := envelopeFromResult(t, res)
+	if statusCode(t, env) != 200 {
+		t.Fatalf("status = %#v", env["status"])
+	}
+	if env["content_type"] != "image/png" {
+		t.Fatalf("content_type = %#v", env["content_type"])
+	}
+}
+
 func TestE2E_HeadersAndAuth_PreservesErrorEnvelope(t *testing.T) {
 	var authz, tenant string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
