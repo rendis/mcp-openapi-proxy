@@ -287,3 +287,105 @@ func TestExtractSecurityRequirementsAndScopes(t *testing.T) {
 		t.Fatalf("unexpected scopes: %#v", scopes)
 	}
 }
+
+func TestLoadSpec_XquikOpenAPI31SearchContract(t *testing.T) {
+	doc := &openapi3.T{
+		OpenAPI: "3.1.0",
+		Info:    &openapi3.Info{Title: "Xquik API", Version: "1.0"},
+		Servers: openapi3.Servers{&openapi3.Server{URL: "https://xquik.com"}},
+		Components: &openapi3.Components{
+			SecuritySchemes: openapi3.SecuritySchemes{
+				"apiKey":      &openapi3.SecuritySchemeRef{Value: &openapi3.SecurityScheme{Type: "apiKey", In: "header", Name: "x-api-key"}},
+				"oauthBearer": &openapi3.SecuritySchemeRef{Value: &openapi3.SecurityScheme{Type: "http", Scheme: "bearer"}},
+			},
+		},
+		Paths: &openapi3.Paths{},
+	}
+
+	search := validOperation("Search tweets")
+	search.OperationID = "searchTweets"
+	search.Tags = []string{"Tweets"}
+	search.Security = &openapi3.SecurityRequirements{
+		openapi3.SecurityRequirement{"apiKey": []string{}},
+		openapi3.SecurityRequirement{"oauthBearer": []string{}},
+		openapi3.SecurityRequirement{},
+	}
+	search.Parameters = openapi3.Parameters{
+		&openapi3.ParameterRef{Value: &openapi3.Parameter{
+			Name:     "q",
+			In:       openapi3.ParameterInQuery,
+			Required: true,
+			Schema:   &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"string"}}},
+		}},
+		&openapi3.ParameterRef{Value: &openapi3.Parameter{
+			Name: "queryType",
+			In:   openapi3.ParameterInQuery,
+			Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{
+				Type:    &openapi3.Types{"string"},
+				Default: "Latest",
+				Enum:    []any{"Latest", "Top"},
+			}},
+		}},
+		&openapi3.ParameterRef{Value: &openapi3.Parameter{
+			Name:   "sinceTime",
+			In:     openapi3.ParameterInQuery,
+			Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"string"}}},
+		}},
+		&openapi3.ParameterRef{Value: &openapi3.Parameter{
+			Name: "limit",
+			In:   openapi3.ParameterInQuery,
+			Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{
+				Type:    &openapi3.Types{"integer"},
+				Default: float64(20),
+				Max:     openapi3.Ptr(float64(200)),
+			}},
+		}},
+	}
+	doc.Paths.Set("/api/v1/x/tweets/search", &openapi3.PathItem{Get: search})
+
+	endpoints, _, err := LoadSpec(writeDoc(t, doc))
+	if err != nil {
+		t.Fatalf("LoadSpec(Xquik search): %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
+	}
+
+	ep := endpoints[0]
+	if ep.OperationID != "searchTweets" || ep.BaseURL != "https://xquik.com" {
+		t.Fatalf("unexpected endpoint identity: %#v", ep)
+	}
+	if len(ep.QueryParams) != 4 {
+		t.Fatalf("expected 4 query params, got %#v", ep.QueryParams)
+	}
+
+	params := map[string]Param{}
+	for _, param := range ep.QueryParams {
+		params[param.Name] = param
+	}
+	if !params["q"].Required {
+		t.Fatalf("q should be required: %#v", params["q"])
+	}
+	if got := params["queryType"].Enum; len(got) != 2 || got[0] != "Latest" || got[1] != "Top" {
+		t.Fatalf("queryType enum = %#v", got)
+	}
+	if params["queryType"].Default != "Latest" {
+		t.Fatalf("queryType default = %#v", params["queryType"].Default)
+	}
+	if params["limit"].Maximum == nil || *params["limit"].Maximum != 200 {
+		t.Fatalf("limit maximum = %#v", params["limit"].Maximum)
+	}
+
+	if len(ep.SecurityRequirements) != 3 {
+		t.Fatalf("expected 3 security alternatives, got %#v", ep.SecurityRequirements)
+	}
+	if ep.SecurityRequirements[0].Schemes[0].ParameterName != "x-api-key" {
+		t.Fatalf("api key parameter = %#v", ep.SecurityRequirements[0].Schemes[0])
+	}
+	if ep.SecurityRequirements[1].Schemes[0].Scheme != "bearer" {
+		t.Fatalf("oauth bearer scheme = %#v", ep.SecurityRequirements[1].Schemes[0])
+	}
+	if len(ep.SecurityRequirements[2].Schemes) != 0 {
+		t.Fatalf("anonymous alternative = %#v", ep.SecurityRequirements[2])
+	}
+}
